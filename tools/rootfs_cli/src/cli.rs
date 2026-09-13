@@ -3,6 +3,7 @@ use std::{
     io::{self},
     path::PathBuf,
     process::exit,
+    sync::Arc,
 };
 
 use anyhow::{Context, bail};
@@ -72,10 +73,12 @@ pub fn run_cli() -> Result<(), anyhow::Error> {
         None => bail!("no intact rootfs found at {}", path.display()),
     };
 
+    let rootfs = Arc::new(rootfs);
+
     match opts.command {
         MainCommand::Init { .. } => {}
         MainCommand::Status => {
-            let spec = rootfs.handle.get_manifest_spec();
+            let spec = rootfs.get_manifest_spec();
             info!("path:    {}", path.display());
             info!("url:     {}", spec.url);
             info!("version: {}", spec.version);
@@ -131,7 +134,7 @@ pub fn run_cli() -> Result<(), anyhow::Error> {
                 }
             };
 
-            let exit_code = rootfs.handle.exec(
+            let exit_code = rootfs.exec(
                 &cwd,
                 &vec![],
                 &environment,
