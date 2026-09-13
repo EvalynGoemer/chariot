@@ -1,5 +1,6 @@
+# cargo/rust
 target/
-*.chariot
 
-cli/config.chariot
-cli/patches
+# chariot testing
+.chariot-cache
+*.chariot
