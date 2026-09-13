@@ -1,7 +1,10 @@
 #![allow(dead_code)]
 
 use std::{
-    fs::{DirEntry, File, copy, create_dir_all, exists, hard_link, read_dir, remove_dir, remove_file, rename, set_permissions, symlink_metadata},
+    fs::{
+        DirEntry, File, copy, create_dir_all, exists, hard_link, metadata, read_dir, remove_dir, remove_file, rename, set_permissions,
+        symlink_metadata,
+    },
     io::{self, BufReader, ErrorKind, Read},
     os::unix::fs::{MetadataExt, PermissionsExt},
     path::{Component, Path, PathBuf},
@@ -67,6 +70,15 @@ pub enum FileSystemError {
 
     #[error(transparent)]
     FileLock(#[from] FileLockError),
+}
+
+#[derive(Error, Debug)]
+pub enum MergeDirectoryError {
+    #[error(transparent)]
+    FileSystem(#[from] FileSystemError),
+
+    #[error("Merge conflict from `{}` to `{}`", from.display(), to.display())]
+    Conflict { from: PathBuf, to: PathBuf },
 }
 
 pub fn make_path(path: impl AsRef<Path>) -> Result<(), FileSystemError> {
@@ -309,13 +321,138 @@ pub fn move_contents(from: impl AsRef<Path>, to: impl AsRef<Path>, exceptions: O
 
         let path_from = entry.path();
         let path_to = to.as_ref().join(entry.file_name());
-
         rename(&path_from, &path_to).map_err(|err| FileSystemError::Rename {
-            from: path_from.clone(),
-            to: path_to.clone(),
+            from: path_from,
+            to: path_to,
             source: err,
         })?;
     }
+    Ok(())
+}
+
+fn with_writable_dir<T, E>(dir: impl AsRef<Path>, function: impl FnOnce() -> Result<T, E>) -> Result<T, E>
+where
+    E: From<FileSystemError>,
+{
+    let meta = metadata(&dir).map_err(|err| FileSystemError::Metadata {
+        path: dir.as_ref().to_path_buf(),
+        source: err,
+    })?;
+
+    let original_permissions = meta.permissions();
+    if original_permissions.mode() & 0o200 == 0 {
+        let writable_permissions = {
+            let mut perms = original_permissions.clone();
+            perms.set_mode(original_permissions.mode() | 0o200);
+            perms
+        };
+
+        set_permissions(&dir, writable_permissions).map_err(|err| FileSystemError::SetPermissions {
+            path: dir.as_ref().to_path_buf(),
+            source: err,
+        })?;
+
+        let result = function();
+
+        set_permissions(&dir, original_permissions).map_err(|err| FileSystemError::SetPermissions {
+            path: dir.as_ref().to_path_buf(),
+            source: err,
+        })?;
+
+        return result;
+    }
+
+    function()
+}
+
+pub fn merge_directory(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<(), MergeDirectoryError> {
+    let from_meta = metadata(&from).map_err(|err| FileSystemError::Metadata {
+        path: from.as_ref().to_path_buf(),
+        source: err,
+    })?;
+
+    let original_permissions = from_meta.permissions();
+    if original_permissions.mode() & 0o200 == 0 {
+        let writable_permissions = {
+            let mut perms = original_permissions.clone();
+            perms.set_mode(original_permissions.mode() | 0o200);
+            perms
+        };
+
+        set_permissions(&from, writable_permissions).map_err(|err| FileSystemError::SetPermissions {
+            path: from.as_ref().to_path_buf(),
+            source: err,
+        })?;
+    }
+
+    for entry in dir_entries(&from)? {
+        let to_entry_path = to.as_ref().join(entry.file_name());
+        let to_meta = match symlink_metadata(&to_entry_path) {
+            Ok(meta) => Ok(Some(meta)),
+            Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(FileSystemError::Metadata {
+                path: to_entry_path.clone(),
+                source: err,
+            }),
+        }?;
+
+        let entry_meta = entry.metadata().map_err(|err| FileSystemError::Metadata {
+            path: entry.path(),
+            source: err,
+        })?;
+
+        if let Some(to_meta) = to_meta {
+            if to_meta.is_dir() && entry_meta.is_dir() {
+                merge_directory(entry.path(), &to_entry_path)?;
+                continue;
+            }
+
+            return Err(MergeDirectoryError::Conflict {
+                from: entry.path(),
+                to: to_entry_path,
+            });
+        }
+
+        if entry_meta.is_dir() {
+            let entry_permissions = entry_meta.permissions();
+            if entry_permissions.mode() & 0o200 == 0 {
+                let writable_permissions = {
+                    let mut perms = entry_permissions.clone();
+                    perms.set_mode(entry_permissions.mode() | 0o200);
+                    perms
+                };
+
+                set_permissions(entry.path(), writable_permissions).map_err(|err| FileSystemError::SetPermissions {
+                    path: entry.path(),
+                    source: err,
+                })?;
+
+                rename(entry.path(), &to_entry_path).map_err(|err| FileSystemError::Rename {
+                    from: entry.path(),
+                    to: to_entry_path.clone(),
+                    source: err,
+                })?;
+
+                set_permissions(&to_entry_path, entry_permissions).map_err(|err| FileSystemError::SetPermissions {
+                    path: to_entry_path,
+                    source: err,
+                })?;
+                continue;
+            }
+        }
+
+        rename(entry.path(), &to_entry_path).map_err(|err| FileSystemError::Rename {
+            from: entry.path(),
+            to: to_entry_path,
+            source: err,
+        })?;
+    }
+
+    remove_dir(&from).map_err(|err| FileSystemError::RemoveDirectory {
+        path: from.as_ref().to_path_buf(),
+        source: err,
+    })?;
+
     Ok(())
 }
 

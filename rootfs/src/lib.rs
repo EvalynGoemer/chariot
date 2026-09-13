@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    fs::{canonicalize, rename, write},
+    fs::{canonicalize, write},
     io::{self, Cursor, ErrorKind, Write},
     path::{Path, PathBuf},
     sync::Arc,
@@ -9,7 +9,7 @@ use std::{
 
 use chariot_runtime::{Mount, MountKind, Overlay, OverlayUpperDirectory, RuntimeError, runtime_execute};
 use chariot_util::{
-    fs::{FileSystemError, force_rm, force_rm_contents, make_path},
+    fs::{FileSystemError, MergeDirectoryError, force_rm, force_rm_contents, make_path, merge_directory},
     lock::{DirLock, LockShared, block_attempted},
 };
 use reqwest::blocking::Client;
@@ -71,6 +71,9 @@ pub enum ArchiveInstallError {
 
     #[error(transparent)]
     FileSystem(#[from] FileSystemError),
+
+    #[error(transparent)]
+    MergeDirectory(#[from] MergeDirectoryError),
 
     #[error("Failed to unpack tar archive to `{}`", to.display())]
     TarUnpack { to: PathBuf, source: io::Error },
@@ -293,7 +296,7 @@ impl RootFS {
         hash: impl AsRef<str>,
         subdir: Option<impl AsRef<str>>,
     ) -> Result<(), ArchiveInstallError> {
-        let client = Client::builder().connect_timeout(Duration::from_secs(60)).build()?;
+        let client = Client::builder().timeout(None).connect_timeout(Duration::from_secs(30)).build()?;
         let archive_data = client.get(url.as_ref()).send()?.error_for_status()?.bytes()?;
         let archive_hash = {
             let mut hasher = Sha256::new();
@@ -328,12 +331,7 @@ impl RootFS {
 
         if let Some(subdir) = subdir {
             let from_path = unpack_path.join(subdir.as_ref());
-            rename(&from_path, &dest).map_err(|err| FileSystemError::Rename {
-                from: from_path.to_path_buf(),
-                to: dest.as_ref().to_path_buf(),
-                source: err,
-            })?;
-
+            merge_directory(&from_path, &dest)?;
             force_rm(unpack_path)?;
         }
 
