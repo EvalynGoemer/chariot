@@ -144,6 +144,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
+name = "chariot_core"
+version = "0.1.0"
+dependencies = [
+ "chariot_rootfs",
+ "chariot_runtime",
+ "chariot_util",
+ "rusqlite",
+ "thiserror",
+ "xxhash-rust",
+]
+
+[[package]]
 name = "chariot_rootfs"
 version = "0.1.0"
 dependencies = [
@@ -168,6 +180,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chariot_rootfs",
+ "chariot_runtime",
  "clap",
  "colored",
  "log",
@@ -179,6 +192,17 @@ name = "chariot_runtime"
 version = "0.1.0"
 dependencies = [
  "nix",
+]
+
+[[package]]
+name = "chariot_test_cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chariot_core",
+ "chariot_rootfs",
+ "chariot_runtime",
+ "chariot_util",
 ]
 
 [[package]]
@@ -2120,6 +2144,12 @@ dependencies = [
  "libc",
  "rustix",
 ]
+
+[[package]]
+name = "xxhash-rust"
+version = "0.8.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aee1b19627c7c60102ab80d3a9cbe18de90bfe03bfa6c3715447681f0e8c8af6"
 
 [[package]]
 name = "xz2"
