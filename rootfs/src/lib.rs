@@ -35,7 +35,7 @@ mod state;
 
 pub const DEFAULT_MANIFESTS_URL: &str = "https://cdn.chariot-build.dev/manifests/x86_64/@VERSION@.toml";
 
-const ROOTFS_VERSION: i64 = 2;
+const ROOTFS_VERSION: i64 = 3;
 
 #[derive(Debug, Error)]
 pub enum RootFSInitError {
@@ -190,9 +190,7 @@ impl RootFS {
             manifest: manifest_spec.clone(),
             cached_manifest: CachedManifest {
                 root_packages: manifest.packages.root,
-                package_bsdtar: manifest.packages.bsdtar,
-                package_git: manifest.packages.git,
-                package_patch: manifest.packages.patch,
+                binary_to_package_map: manifest.packages.binary_map,
                 command_pkg_download: manifest.commands.pkg_download,
                 command_pkg_install: manifest.commands.pkg_install,
                 user_uid: manifest.ids.user_uid,
@@ -490,16 +488,8 @@ impl RootFS {
         &self.state.manifest
     }
 
-    pub fn get_bsdtar_package(&self) -> &String {
-        &self.state.cached_manifest.package_bsdtar
-    }
-
-    pub fn get_git_package(&self) -> &String {
-        &self.state.cached_manifest.package_git
-    }
-
-    pub fn get_patch_package(&self) -> &String {
-        &self.state.cached_manifest.package_patch
+    pub fn lookup_package_of_binary(&self, binary: impl AsRef<str>) -> Option<&String> {
+        self.state.cached_manifest.binary_to_package_map.get(binary.as_ref())
     }
 
     pub fn exec(

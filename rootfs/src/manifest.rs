@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use url::Url;
 
-pub const ROOTFS_MANIFEST_VERSION: i64 = 3;
+pub const ROOTFS_MANIFEST_VERSION: i64 = 4;
 
 const MANIFEST_URL_VERSION_PLACEHOLDER: &str = "@VERSION@";
 pub const PLACEHOLDER_ROOT_PACKAGES: &str = "@ROOT_PACKAGES@";
@@ -52,9 +52,7 @@ pub struct ManifestIDs {
 #[derive(Deserialize)]
 pub struct ManifestPackages {
     pub root: HashSet<String>,
-    pub bsdtar: String,
-    pub git: String,
-    pub patch: String,
+    pub binary_map: HashMap<String, String>,
 }
 
 #[derive(Deserialize)]

@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs::{exists, read_to_string, write},
     path::Path,
     str::FromStr,
@@ -17,9 +17,7 @@ const STATE_KEY_ROOTFS_VERSION: &str = "rootfs_version";
 #[derive(Deserialize, Serialize)]
 pub struct CachedManifest {
     pub root_packages: HashSet<String>,
-    pub package_bsdtar: String,
-    pub package_git: String,
-    pub package_patch: String,
+    pub binary_to_package_map: HashMap<String, String>,
 
     pub command_pkg_download: String,
     pub command_pkg_install: String,
