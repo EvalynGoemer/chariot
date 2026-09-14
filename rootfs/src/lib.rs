@@ -139,6 +139,11 @@ enum RootFSPath {
     PackageSetWork,
 }
 
+pub enum RootFSOverlay {
+    ReadOnly(PathBuf),
+    ReadWrite { path: PathBuf, work_path: PathBuf },
+}
+
 pub struct PkgSetMeta {
     pub id: i64,
     pub state: PkgSetState,
@@ -500,23 +505,38 @@ impl RootFS {
         logger: &mut dyn Write,
         args: Vec<impl AsRef<str>>,
         pkgset: Option<&CachedPkgSet>,
+        rootfs_overlay: Option<RootFSOverlay>,
     ) -> Result<i32, RuntimeError> {
-        let mut lower_mounts = Vec::new();
+        let mut late_mounts = Vec::new();
+
+        let mut lower_directories = Vec::from([self.sub_path(RootFSPath::Fs)]);
+        if let Some(RootFSOverlay::ReadOnly(path)) = &rootfs_overlay {
+            lower_directories.push(path.clone());
+        }
+
         if let Some(pkgset) = pkgset {
             assert!(pkgset.rootfs.path == self.path);
 
-            let mut lower_directories = Vec::from([self.sub_path(RootFSPath::Fs), pkgset.path()]);
+            lower_directories.insert(1, pkgset.path());
 
             let mut base = &pkgset.base;
             while let Some(pkgset) = base {
                 lower_directories.insert(1, pkgset.path());
                 base = &pkgset.base;
             }
+        }
 
-            lower_mounts.push(Mount {
+        if pkgset.is_some() || rootfs_overlay.is_some() {
+            late_mounts.push(Mount {
                 dest: PathBuf::new(),
                 kind: MountKind::OverlayFS(Overlay {
-                    upper_directory: None,
+                    upper_directory: match rootfs_overlay {
+                        Some(RootFSOverlay::ReadWrite { path, work_path }) => Some(OverlayUpperDirectory {
+                            upper_directory: path,
+                            work_directory: work_path,
+                        }),
+                        _ => None,
+                    },
                     lower_directories,
                 }),
             });
@@ -528,7 +548,7 @@ impl RootFS {
             self.state.cached_manifest.user_uid,
             self.state.cached_manifest.user_gid,
             cwd,
-            &lower_mounts.iter().collect(),
+            &late_mounts.iter().collect(),
             mounts,
             environment,
             false,

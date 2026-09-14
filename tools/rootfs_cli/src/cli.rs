@@ -141,6 +141,7 @@ pub fn run_cli() -> Result<(), anyhow::Error> {
                 &mut logger,
                 args.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
                 pkgset.as_deref(),
+                None,
             )?;
 
             exit(exit_code);
