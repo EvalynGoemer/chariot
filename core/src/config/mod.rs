@@ -12,7 +12,7 @@ pub mod source;
 
 const CONFIG_VERSION: u64 = 1;
 
-#[derive(Hash)]
+#[derive(Default, Hash)]
 pub struct Dependencies {
     pub native: BTreeSet<String>,
     pub sources: BTreeMap<String, Arc<Source>>,
