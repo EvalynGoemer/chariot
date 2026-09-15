@@ -23,13 +23,10 @@
                         rustup
                         clang
                         lld
-                        bun
-                        sqlitebrowser
-                    ];
 
-                    buildInputs = with pkgs; [
-                        pkgconf
-                        sqlite
+                        sqlitebrowser
+
+                        bun
                     ];
                 };
             });
