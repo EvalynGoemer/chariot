@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet},
     hash::Hash,
     sync::Arc,
 };
@@ -18,30 +18,20 @@ pub struct Dependencies {
     pub packages: Vec<Arc<Package>>,
 }
 
+#[derive(Hash)]
+pub struct GlobalEnvironment {
+    pub rootfs_manifest_hash: String,
+    pub global_environment_variables: BTreeMap<String, String>,
+    pub target_arch: String,
+    pub target_prefix: String,
+}
+
 pub struct Config {
-    pub env: Arc<ConfigEnv>,
+    pub global_env: Arc<GlobalEnvironment>,
 
     /// all packages referenced by config must be here
     pub packages: Vec<Arc<Package>>,
 
     /// all sources referenced by config must be here
     pub sources: Vec<Arc<Source>>,
-}
-
-pub struct ConfigEnv {
-    pub rootfs_manifest_hash: String,
-
-    pub target_prefix: String,
-
-    /// key must be alphanumeric
-    pub effective_options: HashMap<String, String>,
-}
-
-impl ConfigEnv {
-    pub fn resolve_subscribed_options(&self, subscribed_options: &HashSet<String>) -> BTreeMap<String, String> {
-        subscribed_options
-            .iter()
-            .map(|key| (key.clone(), self.effective_options[key].clone()))
-            .collect()
-    }
 }

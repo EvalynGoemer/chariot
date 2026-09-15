@@ -1,12 +1,12 @@
 use std::{
-    collections::HashSet,
+    collections::BTreeMap,
     hash::{Hash, Hasher},
     sync::Arc,
 };
 
 use xxhash_rust::xxh3::Xxh3;
 
-use crate::config::{ConfigEnv, Dependencies, script::Script};
+use crate::config::{Dependencies, GlobalEnvironment, script::Script};
 
 #[derive(Debug, Clone, Copy, PartialEq, Hash)]
 pub enum PackagePlatform {
@@ -15,15 +15,14 @@ pub enum PackagePlatform {
 }
 
 pub struct Package {
-    pub config_env: Arc<ConfigEnv>,
+    pub global_env: Arc<GlobalEnvironment>,
     pub platform: PackagePlatform,
     pub name: String,
     pub version: String,
     pub revision: usize,
     pub dependencies: Dependencies,
     pub runtime_dependencies: Vec<Arc<Package>>,
-    /// must contain keys into effective_options
-    pub subscribed_options: HashSet<String>,
+    pub environment_variables: BTreeMap<String, String>,
     pub configure: Option<Script>,
     pub build: Option<Script>,
     pub install: Script,
@@ -32,9 +31,8 @@ pub struct Package {
 impl Package {
     pub fn get_content_hash(&self) -> u64 {
         let mut hasher = Xxh3::new();
-        self.config_env.rootfs_manifest_hash.hash(&mut hasher);
-        self.config_env.target_prefix.hash(&mut hasher);
-        self.config_env.resolve_subscribed_options(&self.subscribed_options).hash(&mut hasher);
+        self.global_env.hash(&mut hasher);
+        self.environment_variables.hash(&mut hasher);
         self.dependencies.hash(&mut hasher);
         self.configure.hash(&mut hasher);
         self.build.hash(&mut hasher);

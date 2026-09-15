@@ -5,7 +5,7 @@ use chariot_util::fs::FileSystemError;
 use thiserror::Error;
 
 use crate::{
-    CoreContext, HOST_ARCH, NOARCH_ARCH,
+    CoreContext, HOST_ARCH,
     cache::{StoreEntry, WorkDirectory},
     config::{
         Dependencies,
@@ -75,13 +75,7 @@ pub fn resolve_dependencies<'a>(
             &pkg.name,
             &pkg.version,
             pkg.revision,
-            if pkg.subscribed_options.contains("arch")
-                && let Some(arch) = pkg.config_env.effective_options.get("arch")
-            {
-                arch
-            } else {
-                NOARCH_ARCH
-            },
+            &pkg.global_env.target_arch,
             entries.iter().map(|entry| entry.path()).collect(),
             &sysroot_workdir.path(),
             false,

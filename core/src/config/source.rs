@@ -1,12 +1,12 @@
 use std::{
-    collections::HashSet,
+    collections::BTreeMap,
     hash::{Hash, Hasher},
     sync::Arc,
 };
 
 use xxhash_rust::xxh3::Xxh3;
 
-use crate::config::{ConfigEnv, Dependencies, script::Script};
+use crate::config::{Dependencies, GlobalEnvironment, script::Script};
 
 #[derive(Hash)]
 pub enum SourceBase {
@@ -40,18 +40,24 @@ pub struct GitSource {
     pub revision: String,
 }
 
+#[derive(Hash)]
+pub struct SourcePrepare {
+    pub global_env: Arc<GlobalEnvironment>,
+    pub dependencies: Dependencies,
+    pub environment_variables: BTreeMap<String, String>,
+    pub script: Script,
+}
+
 pub struct Source {
-    pub config_env: Arc<ConfigEnv>,
     pub base: SourceBase,
     pub patches: Vec<String>,
-    pub prepare: Option<(Dependencies, HashSet<String>, Script)>,
+    pub prepare: Option<SourcePrepare>,
 }
 
 impl Source {
     pub fn get_hashes(&self) -> (u64, u64, u64) {
         let base_hash = {
             let mut hasher = Xxh3::new();
-            self.config_env.rootfs_manifest_hash.hash(&mut hasher);
             self.base.hash(&mut hasher);
             hasher.finish()
         };
@@ -66,10 +72,7 @@ impl Source {
         let prepare_hash = {
             let mut hasher = Xxh3::new();
             patch_hash.hash(&mut hasher);
-            self.prepare
-                .as_ref()
-                .map(|(deps, subscribed_options, script)| (deps, self.config_env.resolve_subscribed_options(&subscribed_options), script))
-                .hash(&mut hasher);
+            self.prepare.hash(&mut hasher);
             hasher.finish()
         };
 

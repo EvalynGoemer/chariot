@@ -97,17 +97,14 @@ pub fn fetch_source(ctx: &CoreContext, logger: &mut dyn Write, source: &Source) 
         store_entries.push(patched_store_entry);
     };
 
-    if let Some((dependencies, subscribed_options, prepare_script)) = &source.prepare {
-        let exec_env = resolve_dependencies(ctx, logger, dependencies).map_err(|err| Box::new(err))?;
+    if let Some(prepare) = &source.prepare {
+        let exec_env = resolve_dependencies(ctx, logger, &prepare.dependencies).map_err(|err| Box::new(err))?;
 
         let prepare_store_entry = match StoreEntry::get(&ctx.cache, "source.prepare", prepare_hash)? {
             Some(store_entry) => store_entry,
             None => {
                 let overlay_work_directory = WorkDirectory::create(&ctx.cache)?;
                 let work_directory = WorkDirectory::create(&ctx.cache)?;
-
-                let active_options = source.config_env.resolve_subscribed_options(subscribed_options);
-                let option_environment_vars = active_options.iter().map(|(k, v)| (format!("OPTION_{}", k), v)).collect::<Vec<_>>();
 
                 let exit_code = exec_env.exec(
                     "/chariot/source",
@@ -121,13 +118,20 @@ pub fn fetch_source(ctx: &CoreContext, logger: &mut dyn Write, source: &Source) 
                             }),
                         }),
                     }],
-                    &option_environment_vars
+                    &prepare
+                        .global_env
+                        .global_environment_variables
                         .iter()
+                        .chain(&prepare.environment_variables)
                         .map(|(k, v)| (k.as_str(), v.as_str()))
-                        .chain([("SOURCE_DIR", "/chariot/source")])
+                        .chain([
+                            ("SOURCE_DIR", "/chariot/source"),
+                            ("PREFIX", prepare.global_env.target_prefix.as_str()),
+                            ("ARCH", prepare.global_env.target_arch.as_str()),
+                        ])
                         .collect(),
                     logger,
-                    prepare_script.command(),
+                    prepare.script.command(),
                 )?;
 
                 if exit_code != 0 {

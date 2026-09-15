@@ -1,11 +1,11 @@
-use std::{collections::HashMap, io::Write, path::PathBuf};
+use std::{io::Write, path::PathBuf};
 
 use chariot_runtime::{Mount, MountKind, RuntimeError};
 use chariot_util::fs::FileSystemError;
 use thiserror::Error;
 
 use crate::{
-    CoreContext, HOST_ARCH, NOARCH_ARCH,
+    CoreContext, HOST_ARCH,
     cache::{StoreEntry, WorkDirectory},
     config::package::{Package, PackagePlatform},
     dependencies::{ResolveDependenciesError, resolve_dependencies},
@@ -61,15 +61,7 @@ pub fn process_package(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
         &package.version,
         package.revision,
         match package.platform {
-            PackagePlatform::Target => {
-                if package.subscribed_options.contains("arch")
-                    && let Some(arch) = package.config_env.effective_options.get("arch")
-                {
-                    arch
-                } else {
-                    NOARCH_ARCH
-                }
-            }
+            PackagePlatform::Target => &package.global_env.target_arch,
             PackagePlatform::Host => HOST_ARCH,
         },
         runtime_deps.iter().map(|str| str.as_str()).collect(),
@@ -101,23 +93,30 @@ fn get_package_install(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
         },
     };
 
-    let mut base_env = HashMap::from([
-        ("BUILD_DIR", "/chariot/build"),
-        (
-            "PREFIX",
-            match package.platform {
-                PackagePlatform::Host => "/usr/local",
-                PackagePlatform::Target => &package.config_env.target_prefix,
-            },
-        ),
-    ]);
-
-    let active_options = package.config_env.resolve_subscribed_options(&package.subscribed_options);
-    let option_environment_vars = active_options.iter().map(|(k, v)| (format!("OPTION_{}", k), v)).collect::<Vec<_>>();
-
-    for (k, v) in &option_environment_vars {
-        base_env.insert(k, v);
-    }
+    let base_env = package
+        .global_env
+        .global_environment_variables
+        .iter()
+        .chain(&package.environment_variables)
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .chain([
+            ("BUILD_DIR", "/chariot/build"),
+            (
+                "PREFIX",
+                match package.platform {
+                    PackagePlatform::Host => "/usr/local",
+                    PackagePlatform::Target => &package.global_env.target_prefix,
+                },
+            ),
+            (
+                "ARCH",
+                match package.platform {
+                    PackagePlatform::Host => &package.global_env.target_arch,
+                    PackagePlatform::Target => HOST_ARCH,
+                },
+            ),
+        ])
+        .collect();
 
     if let Some(configure) = &package.configure {
         let exit_code = exec_env.exec("/chariot/build", vec![&build_mount], &base_env, logger, configure.command())?;
