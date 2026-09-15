@@ -18,7 +18,7 @@ pub const HOST_ARCH: &str = "x86_64";
 pub const NOARCH_ARCH: &str = "noarch";
 
 pub struct CoreContext {
-    pub parallelism: u64,
+    pub parallelism: usize,
     pub rootfs: Arc<RootFS>,
     pub cache: Arc<Cache>,
     pub root_pkgset: Option<Arc<CachedPkgSet>>,
