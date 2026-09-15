@@ -1,0 +1,12 @@
+[package]
+name = "chariot_core"
+edition = "2024"
+version.workspace = true
+authors.workspace = true
+
+[dependencies]
+chariot_runtime.workspace = true
+chariot_rootfs.workspace = true
+chariot_util.workspace = true
+thiserror.workspace = true
+xxhash-rust = { version = "0.8.18", features = ["xxh3"] }

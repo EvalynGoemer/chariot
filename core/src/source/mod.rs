@@ -1,0 +1,144 @@
+use std::{collections::HashMap, io::Write, path::PathBuf};
+
+use chariot_runtime::{Mount, MountKind::OverlayFS, Overlay, OverlayUpperDirectory, RuntimeError};
+use chariot_util::fs::FileSystemError;
+use thiserror::Error;
+
+use crate::{
+    CoreContext,
+    cache::{StoreEntry, WorkDirectory},
+    config::{
+        script::Script,
+        source::{Source, SourceBase},
+    },
+    dependencies::{ResolveDependenciesError, resolve_dependencies},
+    source::{
+        archive::{ArchiveFetchError, fetch_archive},
+        git::{GitFetchError, fetch_git_repository},
+    },
+};
+
+mod archive;
+mod git;
+
+#[derive(Debug, Error)]
+pub enum SourceFetchError {
+    #[error(transparent)]
+    FileSystem(#[from] FileSystemError),
+
+    #[error(transparent)]
+    Runtime(#[from] RuntimeError),
+
+    #[error(transparent)]
+    ResolveDependencies(#[from] Box<ResolveDependenciesError>), // TODO: box here is nasty
+
+    #[error(transparent)]
+    Archive(#[from] ArchiveFetchError),
+
+    #[error(transparent)]
+    Git(#[from] GitFetchError),
+
+    #[error("Patch failed")]
+    Patch,
+
+    #[error("Prepare failed")]
+    Prepare,
+}
+
+pub fn fetch_source(ctx: &CoreContext, logger: &mut dyn Write, source: &Source) -> Result<Vec<StoreEntry>, SourceFetchError> {
+    let mut store_entries = Vec::new();
+    let (base_hash, patch_hash, prepare_hash) = source.get_hashes();
+
+    let base_store_entry = match StoreEntry::get(&ctx.cache, "source.base", base_hash)? {
+        Some(store_entry) => store_entry,
+        None => match &source.base {
+            SourceBase::Archive(archive) => fetch_archive(ctx, logger, &archive)?,
+            SourceBase::Git(git_source) => fetch_git_repository(ctx, logger, &git_source)?,
+        }
+        .move_to_store("source.base", base_hash)?,
+    };
+    store_entries.push(base_store_entry);
+
+    if source.patches.len() > 0 {
+        let patched_store_entry = match StoreEntry::get(&ctx.cache, "source.patch", patch_hash)? {
+            Some(store_entry) => store_entry,
+            None => {
+                let overlay_work_directory = WorkDirectory::create(&ctx.cache)?;
+                let work_directory = WorkDirectory::create(&ctx.cache)?;
+
+                for patch in &source.patches {
+                    let exit_code = ctx.rootfs.exec(
+                        "/chariot/source",
+                        &vec![&Mount {
+                            dest: PathBuf::from("/chariot/source"),
+                            kind: OverlayFS(Overlay {
+                                lower_directories: store_entries.iter().map(|entry| entry.path()).collect(),
+                                upper_directory: Some(OverlayUpperDirectory {
+                                    upper_directory: work_directory.path(),
+                                    work_directory: overlay_work_directory.path(),
+                                }),
+                            }),
+                        }],
+                        &HashMap::from([("CHARIOT_PATCH", patch)]),
+                        logger,
+                        Script::bash("echo \"$CHARIOT_PATCH\" | patch -p1").command(),
+                        ctx.patch_pkgset.as_deref(),
+                        None,
+                    )?;
+
+                    if exit_code != 0 {
+                        return Err(SourceFetchError::Patch);
+                    }
+                }
+
+                work_directory.move_to_store("source.patch", patch_hash)?
+            }
+        };
+        store_entries.push(patched_store_entry);
+    };
+
+    if let Some((dependencies, subscribed_options, prepare_script)) = &source.prepare {
+        let exec_env = resolve_dependencies(ctx, logger, dependencies).map_err(|err| Box::new(err))?;
+
+        let prepare_store_entry = match StoreEntry::get(&ctx.cache, "source.prepare", prepare_hash)? {
+            Some(store_entry) => store_entry,
+            None => {
+                let overlay_work_directory = WorkDirectory::create(&ctx.cache)?;
+                let work_directory = WorkDirectory::create(&ctx.cache)?;
+
+                let active_options = source.config_env.resolve_subscribed_options(subscribed_options);
+                let option_environment_vars = active_options.iter().map(|(k, v)| (format!("OPTION_{}", k), v)).collect::<Vec<_>>();
+
+                let exit_code = exec_env.exec(
+                    "/chariot/source",
+                    vec![&Mount {
+                        dest: PathBuf::from("/chariot/source"),
+                        kind: OverlayFS(Overlay {
+                            lower_directories: store_entries.iter().map(|entry| entry.path()).collect(),
+                            upper_directory: Some(OverlayUpperDirectory {
+                                upper_directory: work_directory.path(),
+                                work_directory: overlay_work_directory.path(),
+                            }),
+                        }),
+                    }],
+                    &option_environment_vars
+                        .iter()
+                        .map(|(k, v)| (k.as_str(), v.as_str()))
+                        .chain([("SOURCE_DIR", "/chariot/source")])
+                        .collect(),
+                    logger,
+                    prepare_script.command(),
+                )?;
+
+                if exit_code != 0 {
+                    return Err(SourceFetchError::Prepare);
+                }
+
+                work_directory.move_to_store("source.prepare", prepare_hash)?
+            }
+        };
+        store_entries.push(prepare_store_entry);
+    }
+
+    Ok(store_entries)
+}
