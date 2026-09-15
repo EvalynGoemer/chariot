@@ -10,6 +10,8 @@ pub mod package;
 pub mod script;
 pub mod source;
 
+const CONFIG_VERSION: u64 = 1;
+
 #[derive(Hash)]
 pub struct Dependencies {
     pub native: BTreeSet<String>,

@@ -6,7 +6,7 @@ use std::{
 
 use xxhash_rust::xxh3::Xxh3;
 
-use crate::config::{Dependencies, GlobalEnvironment, script::Script};
+use crate::config::{CONFIG_VERSION, Dependencies, GlobalEnvironment, script::Script};
 
 #[derive(Debug, Clone, Copy, PartialEq, Hash)]
 pub enum PackagePlatform {
@@ -31,6 +31,7 @@ pub struct Package {
 impl Package {
     pub fn get_content_hash(&self) -> u64 {
         let mut hasher = Xxh3::new();
+        CONFIG_VERSION.hash(&mut hasher);
         self.global_env.hash(&mut hasher);
         self.environment_variables.hash(&mut hasher);
         self.dependencies.hash(&mut hasher);

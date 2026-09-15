@@ -6,7 +6,7 @@ use std::{
 
 use xxhash_rust::xxh3::Xxh3;
 
-use crate::config::{Dependencies, GlobalEnvironment, script::Script};
+use crate::config::{CONFIG_VERSION, Dependencies, GlobalEnvironment, script::Script};
 
 #[derive(Hash)]
 pub enum SourceBase {
@@ -58,6 +58,7 @@ impl Source {
     pub fn get_hashes(&self) -> (u64, u64, u64) {
         let base_hash = {
             let mut hasher = Xxh3::new();
+            CONFIG_VERSION.hash(&mut hasher);
             self.base.hash(&mut hasher);
             hasher.finish()
         };
