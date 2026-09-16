@@ -1,0 +1,13 @@
+[package]
+name = "chariot_config"
+edition = "2024"
+version.workspace = true
+authors.workspace = true
+
+[dependencies]
+chariot_core.workspace = true
+chariot_util.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+mlua = { version = "0.11.5", features = ["lua55", "vendored"] }
+serde = { workspace = true, features = ["derive"] }
