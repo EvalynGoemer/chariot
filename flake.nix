@@ -4,7 +4,7 @@
     };
 
     outputs =
-        { nixpkgs, ... }:
+        { self, nixpkgs, ... }:
         let
             systems = [
                 "x86_64-linux"
@@ -28,6 +28,24 @@
 
                         bun
                     ];
+                };
+            });
+
+            packages = forEachSystem (pkgs: {
+                default = pkgs.rustPlatform.buildRustPackage {
+                    name = "chariot";
+                    src = self;
+
+                    cargoLock.lockFile = ./Cargo.lock;
+
+                    nativeBuildInputs = with pkgs; [ installShellFiles ];
+
+                    meta = {
+                        description = "Modern meta build system for bootstrapping operating system distributions.";
+                        homepage = "https://github.com/elysium-os/chariot";
+                        license = pkgs.lib.licenses.bsd3;
+                        maintainers = with pkgs.lib.maintainers; [ wux ];
+                    };
                 };
             });
         };

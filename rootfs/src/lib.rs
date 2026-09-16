@@ -256,7 +256,7 @@ impl RootFS {
             _lock: rootfs_lock.relock_shared_noblock()?,
             path,
             state,
-            db,
+            db: Mutex::new(db),
         })
     }
 
