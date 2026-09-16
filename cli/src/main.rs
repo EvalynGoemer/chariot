@@ -10,6 +10,7 @@ use nix::{
 use crate::cli::run_cli;
 
 mod cli;
+mod util;
 
 const LOGGER: ChariotLogger = ChariotLogger;
 

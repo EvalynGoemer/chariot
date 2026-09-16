@@ -5,6 +5,7 @@ use std::{
     path::PathBuf,
     sync::Arc,
     thread::available_parallelism,
+    time::Duration,
 };
 
 use anyhow::{Context, Result, bail};
@@ -14,7 +15,10 @@ use chariot_core::{
 };
 use chariot_rootfs::{CachedPkgSet, DEFAULT_MANIFESTS_URL, ManifestFetchSpec, RootFS};
 use clap::{Args, Parser, Subcommand};
+use indicatif::{ProgressBar, ProgressStyle};
 use log::{info, warn};
+
+use crate::util::ProgressBarWriter;
 
 #[derive(Parser)]
 #[command(version, next_line_help = true)]
@@ -64,7 +68,14 @@ pub fn run_cli() -> Result<()> {
     let rootfs = match RootFS::get(&opts.rootfs).context("Failed to get rootfs")? {
         None => {
             info!("No rootfs found");
-            info!("Initializing rootfs `{}`", rootfs_config.version);
+
+            let pb = ProgressBar::no_length()
+                .with_style(ProgressStyle::with_template("{elapsed:.yellow.light} | {prefix:.bold} {wide_msg:.dim}")?)
+                .with_message("Downloading...")
+                .with_prefix(format!("Initializing rootfs `{}`", rootfs_config.version));
+            pb.enable_steady_tick(Duration::from_millis(100));
+
+            let mut pb_writer = ProgressBarWriter::init(&pb);
 
             let rootfs = RootFS::init(
                 &opts.rootfs,
@@ -73,9 +84,11 @@ pub fn run_cli() -> Result<()> {
                     version: rootfs_config.version,
                     hash: rootfs_config.hash,
                 },
-                &mut stdout(),
+                &mut pb_writer,
             )
             .context("Failed to initialize rootfs")?;
+
+            pb.finish_and_clear();
 
             info!("Successfully initialized the rootfs");
             rootfs
@@ -117,7 +130,16 @@ pub fn run_cli() -> Result<()> {
         let Some(pkg) = rootfs.lookup_package_of_binary(binary) else {
             bail!("This rootfs manifest is missing a required package mapping for the `{}` binary", binary);
         };
-        binary_to_pkgset.insert(binary, CachedPkgSet::get(&rootfs, None, &BTreeSet::from([pkg.as_str()]), &mut stdout())?);
+
+        let pb = ProgressBar::no_length()
+            .with_style(ProgressStyle::with_template("{elapsed:.yellow.light} | {prefix:.bold} {wide_msg:.dim}")?)
+            .with_prefix(format!("Fetching {} package set", pkg));
+        pb.enable_steady_tick(Duration::from_millis(100));
+
+        let mut pb_writer = ProgressBarWriter::init(&pb);
+        binary_to_pkgset.insert(binary, CachedPkgSet::get(&rootfs, None, &BTreeSet::from([pkg.as_str()]), &mut pb_writer)?);
+
+        pb.finish_and_clear();
     }
 
     let ctx = CoreContext {
