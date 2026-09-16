@@ -33,7 +33,13 @@ impl Package {
     pub fn get_content_hash(&self) -> u128 {
         let mut hasher = Xxh3::new();
         CONFIG_VERSION.hash(&mut hasher);
-        self.global_env.hash(&mut hasher);
+        self.global_env.rootfs_manifest_hash.hash(&mut hasher);
+        self.global_env.global_environment_variables.hash(&mut hasher);
+        self.platform.hash(&mut hasher);
+        if self.platform == PackagePlatform::Target {
+            self.global_env.target_arch.hash(&mut hasher);
+            self.global_env.target_prefix.hash(&mut hasher);
+        }
         self.environment_variables.hash(&mut hasher);
         self.dependencies.hash(&mut hasher);
         self.configure.hash(&mut hasher);

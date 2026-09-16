@@ -20,7 +20,7 @@ pub struct Dependencies {
     pub packages: Vec<Arc<Package>>,
 }
 
-#[derive(Debug, Hash)]
+#[derive(Debug)]
 pub struct GlobalEnvironment {
     pub rootfs_manifest_hash: String,
     pub global_environment_variables: BTreeMap<String, String>,

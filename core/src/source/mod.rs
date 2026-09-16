@@ -124,11 +124,7 @@ pub fn fetch_source(ctx: &CoreContext, logger: &mut dyn Write, source: &Source) 
                         .iter()
                         .chain(&prepare.environment_variables)
                         .map(|(k, v)| (k.as_str(), v.as_str()))
-                        .chain([
-                            ("SOURCE_DIR", "/chariot/source"),
-                            ("PREFIX", prepare.global_env.target_prefix.as_str()),
-                            ("ARCH", prepare.global_env.target_arch.as_str()),
-                        ])
+                        .chain([("SOURCE_DIR", "/chariot/source")])
                         .collect(),
                     logger,
                     prepare.script.command(),

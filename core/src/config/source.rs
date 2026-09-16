@@ -40,7 +40,7 @@ pub struct GitSource {
     pub revision: String,
 }
 
-#[derive(Debug, Hash)]
+#[derive(Debug)]
 pub struct SourcePrepare {
     pub global_env: Arc<GlobalEnvironment>,
     pub dependencies: Dependencies,
@@ -74,7 +74,13 @@ impl Source {
         let prepare_hash = {
             let mut hasher = Xxh3::new();
             patch_hash.hash(&mut hasher);
-            self.prepare.hash(&mut hasher);
+            if let Some(prepare) = &self.prepare {
+                prepare.global_env.rootfs_manifest_hash.hash(&mut hasher);
+                prepare.global_env.global_environment_variables.hash(&mut hasher);
+                prepare.environment_variables.hash(&mut hasher);
+                prepare.dependencies.hash(&mut hasher);
+                prepare.script.hash(&mut hasher);
+            }
             hasher.digest128()
         };
 
