@@ -32,7 +32,7 @@ pub struct CoreContext {
     pub patch_pkgset: Option<Arc<CachedPkgSet>>,
 }
 
-pub fn collect_all_hashes(config: &Config) -> HashSet<(&'static str, u64)> {
+pub fn collect_all_hashes(config: &Config) -> HashSet<(&'static str, u128)> {
     let mut hashes = HashSet::new();
     for pkg in &config.packages {
         hashes.insert(("install", pkg.get_content_hash()));

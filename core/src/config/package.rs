@@ -30,7 +30,7 @@ pub struct Package {
 }
 
 impl Package {
-    pub fn get_content_hash(&self) -> u64 {
+    pub fn get_content_hash(&self) -> u128 {
         let mut hasher = Xxh3::new();
         CONFIG_VERSION.hash(&mut hasher);
         self.global_env.hash(&mut hasher);
@@ -39,10 +39,10 @@ impl Package {
         self.configure.hash(&mut hasher);
         self.build.hash(&mut hasher);
         self.install.hash(&mut hasher);
-        hasher.finish()
+        hasher.digest128()
     }
 
-    pub fn get_package_hash(&self) -> u64 {
+    pub fn get_package_hash(&self) -> u128 {
         let mut hasher = Xxh3::new();
         self.get_content_hash().hash(&mut hasher);
         self.platform.hash(&mut hasher);
@@ -50,12 +50,12 @@ impl Package {
         self.version.hash(&mut hasher);
         self.revision.hash(&mut hasher);
         self.runtime_dependencies.hash(&mut hasher);
-        hasher.finish()
+        hasher.digest128()
     }
 }
 
 impl Hash for Package {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        state.write_u64(self.get_package_hash());
+        state.write_u128(self.get_package_hash());
     }
 }

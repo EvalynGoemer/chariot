@@ -56,26 +56,26 @@ pub struct Source {
 }
 
 impl Source {
-    pub fn get_hashes(&self) -> (u64, u64, u64) {
+    pub fn get_hashes(&self) -> (u128, u128, u128) {
         let base_hash = {
             let mut hasher = Xxh3::new();
             CONFIG_VERSION.hash(&mut hasher);
             self.base.hash(&mut hasher);
-            hasher.finish()
+            hasher.digest128()
         };
 
         let patch_hash = {
             let mut hasher = Xxh3::new();
             base_hash.hash(&mut hasher);
             self.patches.hash(&mut hasher);
-            hasher.finish()
+            hasher.digest128()
         };
 
         let prepare_hash = {
             let mut hasher = Xxh3::new();
             patch_hash.hash(&mut hasher);
             self.prepare.hash(&mut hasher);
-            hasher.finish()
+            hasher.digest128()
         };
 
         (base_hash, patch_hash, prepare_hash)
@@ -85,6 +85,6 @@ impl Source {
 impl Hash for Source {
     fn hash<H: Hasher>(&self, state: &mut H) {
         let (_, _, prepare_hash) = self.get_hashes();
-        state.write_u64(prepare_hash);
+        state.write_u128(prepare_hash);
     }
 }

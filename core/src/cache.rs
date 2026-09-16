@@ -49,7 +49,7 @@ impl Cache {
         self.path.join(SUBDIR_WORK).join(format!("{:x}", id))
     }
 
-    fn path_store_entry(&self, category: &str, hash: u64) -> PathBuf {
+    fn path_store_entry(&self, category: &str, hash: u128) -> PathBuf {
         self.path.join(SUBDIR_STORE).join(format!("{}-{:x}", category, hash))
     }
 
@@ -120,7 +120,7 @@ impl WorkDirectory {
         self.cache.path_work_directory(self.id)
     }
 
-    pub fn move_to_store(self, category: &str, hash: u64) -> Result<StoreEntry, FileSystemError> {
+    pub fn move_to_store(self, category: &str, hash: u128) -> Result<StoreEntry, FileSystemError> {
         let _workdir_lock = DirLock::shared(self.cache.path.join(SUBDIR_WORK))?;
         let _store_lock = DirLock::shared(self.cache.path.join(SUBDIR_STORE))?;
 
@@ -163,11 +163,11 @@ pub struct StoreEntry {
     _lock: DirLock<LockShared>,
     cache: Arc<Cache>,
     category: String,
-    hash: u64,
+    hash: u128,
 }
 
 impl StoreEntry {
-    pub fn get(cache: &Arc<Cache>, category: &str, hash: u64) -> Result<Option<StoreEntry>, FileSystemError> {
+    pub fn get(cache: &Arc<Cache>, category: &str, hash: u128) -> Result<Option<StoreEntry>, FileSystemError> {
         let lock = match DirLock::shared_noblock(cache.path_store_entry(category, hash)) {
             Ok(lock) => lock,
             Err(FileSystemError::Open { source, .. }) if source.kind() == ErrorKind::NotFound => return Ok(None),
@@ -186,7 +186,7 @@ impl StoreEntry {
         self.cache.path_store_entry(&self.category, self.hash)
     }
 
-    pub fn hash(&self) -> u64 {
+    pub fn hash(&self) -> u128 {
         self.hash
     }
 }
