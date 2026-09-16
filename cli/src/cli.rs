@@ -9,7 +9,9 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use chariot_config::eval_config;
-use chariot_core::{CoreContext, cache::Cache, config::package::PackagePlatform, dependencies::resolve_repos_for_pkg, xbps::package_install};
+use chariot_core::{
+    CoreContext, HOST_ARCH, cache::Cache, config::package::PackagePlatform, dependencies::resolve_repos_for_pkg, xbps::package_install,
+};
 use chariot_rootfs::{CachedPkgSet, DEFAULT_MANIFESTS_URL, ManifestFetchSpec, RootFS};
 use clap::{Args, Parser, Subcommand};
 use log::{info, warn};
@@ -163,7 +165,10 @@ pub fn run_cli() -> Result<()> {
                     &selected_package.name,
                     &selected_package.version,
                     selected_package.revision,
-                    &selected_package.global_env.target_arch,
+                    match selected_package.platform {
+                        PackagePlatform::Host => HOST_ARCH,
+                        PackagePlatform::Target => &selected_package.global_env.target_arch,
+                    },
                     entries.iter().map(|entry| entry.path()).collect(),
                     &PathBuf::from(&install_opts.dest),
                     false,
