@@ -111,8 +111,8 @@ fn get_package_install(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
             (
                 "ARCH",
                 match package.platform {
-                    PackagePlatform::Host => &package.global_env.target_arch,
-                    PackagePlatform::Target => HOST_ARCH,
+                    PackagePlatform::Host => HOST_ARCH,
+                    PackagePlatform::Target => &package.global_env.target_arch,
                 },
             ),
         ])
