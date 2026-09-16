@@ -17,6 +17,9 @@ pub const CACHE_VERSION: i64 = 5;
 pub const HOST_ARCH: &str = "x86_64";
 pub const NOARCH_ARCH: &str = "noarch";
 
+pub const HOST_PREFIX: &str = "/usr/local";
+pub const DEFAULT_TARGET_PREFIX: &str = "/usr";
+
 pub struct CoreContext {
     pub parallelism: usize,
     pub rootfs: Arc<RootFS>,

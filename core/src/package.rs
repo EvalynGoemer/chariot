@@ -5,7 +5,7 @@ use chariot_util::fs::FileSystemError;
 use thiserror::Error;
 
 use crate::{
-    CoreContext, HOST_ARCH,
+    CoreContext, HOST_ARCH, HOST_PREFIX,
     cache::{StoreEntry, WorkDirectory},
     config::package::{Package, PackagePlatform},
     dependencies::{ResolveDependenciesError, resolve_dependencies},
@@ -104,7 +104,7 @@ fn get_package_install(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
             (
                 "PREFIX",
                 match package.platform {
-                    PackagePlatform::Host => "/usr/local",
+                    PackagePlatform::Host => HOST_PREFIX,
                     PackagePlatform::Target => &package.global_env.target_prefix,
                 },
             ),
