@@ -185,6 +185,7 @@ pub fn package_install(
     repo_dirs: Vec<PathBuf>,
     dest_dir: &Path,
     dest_root_overlay: bool,
+    force: bool,
     logger: &mut dyn Write,
 ) -> Result<(), XBPSPackageInstallError> {
     validate_package_name(name)?;
@@ -245,7 +246,8 @@ pub fn package_install(
             "bash",
             "-c",
             format!(
-                "xbps-install --reproducible --yes --rootdir {} {} \"$PKG_NAME-${{PKG_VER}}_$PKG_REV\"",
+                "xbps-install --reproducible{} --yes --rootdir {} {} \"$PKG_NAME-${{PKG_VER}}_$PKG_REV\"",
+                if force { " --force" } else { "" },
                 if dest_root_overlay { "/" } else { "/chariot/xbps/install" },
                 repo_mounts
                     .iter()
