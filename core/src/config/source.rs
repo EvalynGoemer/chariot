@@ -8,13 +8,13 @@ use xxhash_rust::xxh3::Xxh3;
 
 use crate::config::{CONFIG_VERSION, Dependencies, GlobalEnvironment, script::Script};
 
-#[derive(Hash)]
+#[derive(Debug, Hash)]
 pub enum SourceBase {
     Archive(Archive),
     Git(GitSource),
 }
 
-#[derive(Hash)]
+#[derive(Debug, Hash)]
 pub struct Archive {
     pub url: String,
     pub checksum: String,
@@ -22,25 +22,25 @@ pub struct Archive {
     pub compression: ArchiveCompression,
 }
 
-#[derive(Hash)]
+#[derive(Debug, Hash)]
 pub enum ArchiveKind {
     Tar,
 }
 
-#[derive(Hash)]
+#[derive(Debug, Hash)]
 pub enum ArchiveCompression {
     Xz,
     Gzip,
     Bzip2,
 }
 
-#[derive(Hash)]
+#[derive(Debug, Hash)]
 pub struct GitSource {
     pub url: String,
     pub revision: String,
 }
 
-#[derive(Hash)]
+#[derive(Debug, Hash)]
 pub struct SourcePrepare {
     pub global_env: Arc<GlobalEnvironment>,
     pub dependencies: Dependencies,
@@ -48,6 +48,7 @@ pub struct SourcePrepare {
     pub script: Script,
 }
 
+#[derive(Debug)]
 pub struct Source {
     pub base: SourceBase,
     pub patches: Vec<String>,

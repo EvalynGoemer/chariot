@@ -12,7 +12,7 @@ pub mod source;
 
 const CONFIG_VERSION: u64 = 1;
 
-#[derive(Default, Hash)]
+#[derive(Debug, Default, Hash)]
 pub struct Dependencies {
     pub native: BTreeSet<String>,
     pub sources: BTreeMap<String, Arc<Source>>,
@@ -20,7 +20,7 @@ pub struct Dependencies {
     pub packages: Vec<Arc<Package>>,
 }
 
-#[derive(Hash)]
+#[derive(Debug, Hash)]
 pub struct GlobalEnvironment {
     pub rootfs_manifest_hash: String,
     pub global_environment_variables: BTreeMap<String, String>,

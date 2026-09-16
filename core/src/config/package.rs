@@ -14,6 +14,7 @@ pub enum PackagePlatform {
     Target,
 }
 
+#[derive(Debug)]
 pub struct Package {
     pub global_env: Arc<GlobalEnvironment>,
     pub platform: PackagePlatform,
