@@ -26,7 +26,7 @@ struct ChariotOptions {
     #[arg(long, help = "path to chariot base config", default_value = "chariot_config.toml")]
     config: String,
 
-    #[arg(long, help = "target architecture")]
+    #[arg(long, env = "CHARIOT_ARCH", help = "target architecture")]
     arch: String,
 
     #[arg(long, help = "path to chariot cache", default_value = ".chariot-cache")]
