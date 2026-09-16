@@ -1,6 +1,6 @@
 --- @module "defs"
 
---- Create an archive table.
+--- Create an archive source table.
 --- @param url string
 --- @param checksum string
 --- @param kind string?
@@ -35,6 +35,18 @@ function Archive(url, checksum, kind, compression)
         checksum = checksum,
         kind = kind,
         compression = compression
+    }
+end
+
+--- Create a git source table.
+--- @param url string
+--- @param revision string
+--- @return GitSource
+function Git(url, revision)
+    return {
+        type = "git",
+        url = url,
+        revision = revision,
     }
 end
 
