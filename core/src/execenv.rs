@@ -35,10 +35,17 @@ impl<'a> ExecEnv<'a> {
             .iter()
             .map(|(name, store_entries)| Mount {
                 dest: PathBuf::from("/chariot/sources").join(name),
-                kind: MountKind::OverlayFS(Overlay {
-                    upper_directory: None,
-                    lower_directories: store_entries.iter().map(|entry| entry.path()).rev().collect(),
-                }),
+                kind: match store_entries.len() {
+                    1 => MountKind::Bind {
+                        from: store_entries[0].path(),
+                        read_only: true,
+                        is_file: false,
+                    },
+                    _ => MountKind::OverlayFS(Overlay {
+                        upper_directory: None,
+                        lower_directories: store_entries.iter().map(|entry| entry.path()).rev().collect(),
+                    }),
+                },
             })
             .collect::<Vec<_>>();
 
