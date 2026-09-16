@@ -3,7 +3,7 @@ use std::{
     fs::{canonicalize, write},
     io::{self, Cursor, ErrorKind, Write},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -125,7 +125,7 @@ pub struct RootFS {
     _lock: DirLock<LockShared>,
     path: PathBuf,
     state: State,
-    db: Database,
+    db: Mutex<Database>,
 }
 
 enum RootFSPath {
@@ -285,7 +285,7 @@ impl RootFS {
 
         Ok(Some(Self {
             _lock: rootfs_lock,
-            db: Database::connect(rootfs_sub_path(&path, RootFSPath::Database))?,
+            db: Mutex::new(Database::connect(rootfs_sub_path(&path, RootFSPath::Database))?),
             path,
             state,
         }))
@@ -420,7 +420,7 @@ impl RootFS {
     pub fn list_pkgsets(&self) -> Result<Vec<PkgSetMeta>, RootFSListError> {
         let _pkgsets_lock = DirLock::exclusive(self.sub_path(RootFSPath::PackageSets))?;
 
-        let pkgsets = self.db.get_pkgsets()?;
+        let pkgsets = self.db.lock().unwrap().get_pkgsets()?;
 
         Ok(pkgsets)
     }
@@ -428,7 +428,14 @@ impl RootFS {
     pub fn prune_pkgsets(&self, predicate: fn(pkgset_meta: &PkgSetMeta) -> bool) -> Result<(usize, usize, usize), RootFSPruneError> {
         let _pkgsets_lock = DirLock::exclusive(self.sub_path(RootFSPath::PackageSets))?;
 
-        let pkgsets = self.db.get_pkgsets()?.into_iter().map(|meta| (meta.id, meta)).collect::<HashMap<_, _>>();
+        let pkgsets = self
+            .db
+            .lock()
+            .unwrap()
+            .get_pkgsets()?
+            .into_iter()
+            .map(|meta| (meta.id, meta))
+            .collect::<HashMap<_, _>>();
 
         let pkgsets_total = pkgsets.len();
         let mut pkgsets_removed: usize = 0;
@@ -465,10 +472,10 @@ impl RootFS {
                 continue;
             }
 
-            self.db.update_pkgset(pkgset.id, &PkgSetState::Unknown, None)?;
+            self.db.lock().unwrap().update_pkgset(pkgset.id, &PkgSetState::Unknown, None)?;
             force_rm(&path)?;
 
-            self.db.remove_pkgset(pkgset.id)?;
+            self.db.lock().unwrap().remove_pkgset(pkgset.id)?;
             pkgsets_removed += 1;
 
             if let Some(base) = &pkgset.base {

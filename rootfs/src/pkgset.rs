@@ -59,9 +59,9 @@ impl CachedPkgSet {
 
         let _pkgsets_lock = DirLock::exclusive(rootfs.sub_path(RootFSPath::PackageSets))?;
 
-        let id = rootfs.db.get_pkgset_id(base.as_ref().map(|pkgset| pkgset.id), pkgset)?;
+        let id = rootfs.db.lock().unwrap().get_pkgset_id(base.as_ref().map(|pkgset| pkgset.id), pkgset)?;
 
-        let (state, base_id, mut size) = rootfs.db.get_pkgset(id)?;
+        let (state, base_id, mut size) = rootfs.db.lock().unwrap().get_pkgset(id)?;
         assert!(base.as_ref().map(|pkgset| pkgset.id) == base_id);
 
         let pkgset_path = rootfs.sub_path(RootFSPath::PackageSet(id));
@@ -106,7 +106,7 @@ impl CachedPkgSet {
 
                 size = dir_size(&pkgset_path)?;
 
-                rootfs.db.update_pkgset(id, &PkgSetState::Cached, Some(size))?;
+                rootfs.db.lock().unwrap().update_pkgset(id, &PkgSetState::Cached, Some(size))?;
             }
         }
 
@@ -118,7 +118,7 @@ impl CachedPkgSet {
             deduplicate(&pkgset_path, entry.path())?;
         }
 
-        rootfs.db.update_pkgset(id, &PkgSetState::Deduplicated, None)?;
+        rootfs.db.lock().unwrap().update_pkgset(id, &PkgSetState::Deduplicated, None)?;
 
         Ok(Some(Arc::new(cached_pkgset)))
     }
