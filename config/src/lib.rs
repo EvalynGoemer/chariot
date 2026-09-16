@@ -44,7 +44,7 @@ struct BaseConfig {
     rootfs: RootFSConfig,
 }
 
-pub fn eval_config(base_config_path: impl AsRef<Path>) -> Result<(Config, RootFSConfig), ConfigError> {
+pub fn eval_config(base_config_path: impl AsRef<Path>, target_arch: String) -> Result<(Config, RootFSConfig), ConfigError> {
     let base_config_text = read_to_string(&base_config_path).map_err(|err| {
         ConfigError::ReadBaseConfig(FileSystemError::ReadFile {
             path: base_config_path.as_ref().to_path_buf(),
@@ -56,7 +56,7 @@ pub fn eval_config(base_config_path: impl AsRef<Path>) -> Result<(Config, RootFS
     let global_environment = GlobalEnvironment {
         global_environment_variables: BTreeMap::new(),
         rootfs_manifest_hash: base_config.rootfs.hash.clone(),
-        target_arch: String::from("x86_64"),
+        target_arch,
         target_prefix: base_config.target_prefix.unwrap_or(String::from(DEFAULT_TARGET_PREFIX)),
     };
 
