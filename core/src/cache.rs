@@ -27,6 +27,8 @@ pub struct Cache {
 
 impl Cache {
     pub fn get(path: impl AsRef<Path>) -> Result<Self, FileSystemError> {
+        make_path(&path)?;
+
         let lock = DirLock::exclusive(&path)?;
 
         let cache = Self {
