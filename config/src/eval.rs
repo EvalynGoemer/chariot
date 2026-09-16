@@ -85,6 +85,8 @@ pub fn eval_lua_config(path: &Path, global_environment: GlobalEnvironment) -> Re
 
                     let compression = match compression.as_str() {
                         "gz" => ArchiveCompression::Gzip,
+                        "xz" => ArchiveCompression::Xz,
+                        "bzip2" => ArchiveCompression::Bzip2,
                         _ => return Err(Error::runtime(format!("invalid archive compression `{}`", compression))),
                     };
 

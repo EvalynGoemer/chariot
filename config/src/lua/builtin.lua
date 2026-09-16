@@ -24,6 +24,10 @@ function Archive(url, checksum, kind, compression)
     if compression == nil then
         if url:ends_with(".gz") then
             compression = "gz"
+        elseif url:ends_with(".xz") then
+            compression = "xz"
+        elseif url:ends_with(".bz2") then
+            compression = "bzip2"
         else
             error("could not infer archive compression from url")
         end
