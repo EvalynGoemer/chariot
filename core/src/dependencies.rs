@@ -79,6 +79,7 @@ pub fn resolve_dependencies<'a>(
             entries.iter().map(|entry| entry.path()).collect(),
             &sysroot_workdir.path(),
             false,
+            false,
             logger,
         )?;
     }
@@ -97,6 +98,7 @@ pub fn resolve_dependencies<'a>(
                 entries.iter().map(|entry| entry.path()).collect(),
                 &tool_overlay_workdir.path(),
                 true,
+                false,
                 logger,
             )?;
         }

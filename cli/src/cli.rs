@@ -46,6 +46,9 @@ struct InstallOptions {
     #[arg(long, help = "install a host package (tool)")]
     tool: bool,
 
+    #[arg(long, help = "force reinstallation, even if the package is already installed")]
+    force: bool,
+
     #[arg(required = true, help = "packages to build and install")]
     packages: Vec<String>,
 
@@ -172,6 +175,7 @@ pub fn run_cli() -> Result<()> {
                     entries.iter().map(|entry| entry.path()).collect(),
                     &PathBuf::from(&install_opts.dest),
                     false,
+                    install_opts.force,
                     &mut stdout(),
                 )?;
             }
