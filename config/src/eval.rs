@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     fs::read_to_string,
     path::{Path, PathBuf},
     sync::Arc,
@@ -57,7 +57,7 @@ fn parse_dependencies_table(table: Table) -> Result<Dependencies, mlua::Error> {
     Ok(dependencies)
 }
 
-pub fn eval_lua_config(path: &Path, global_environment: GlobalEnvironment) -> Result<Config, mlua::Error> {
+pub fn eval_lua_config(path: &Path, global_environment: GlobalEnvironment, options: HashMap<String, String>) -> Result<Config, mlua::Error> {
     let global_environment = Arc::new(global_environment);
 
     let lua = Lua::new_with(StdLib::MATH | StdLib::STRING | StdLib::TABLE | StdLib::PACKAGE, LuaOptions::new())?;
@@ -67,7 +67,13 @@ pub fn eval_lua_config(path: &Path, global_environment: GlobalEnvironment) -> Re
         packages: Vec::new(),
     });
 
+    let options_table = lua.create_table()?;
+    for (k, v) in options {
+        options_table.set(k, lua.create_string(v)?)?;
+    }
+
     let chariot_table = lua.create_table()?;
+    chariot_table.set("options", options_table)?;
     chariot_table.set("target_prefix", lua.create_string(&global_environment.target_prefix)?)?;
     chariot_table.set("target_arch", lua.create_string(&global_environment.target_arch)?)?;
     chariot_table.set(

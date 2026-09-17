@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     fs::read_to_string,
     path::{Path, PathBuf},
 };
@@ -45,7 +45,11 @@ struct BaseConfig {
     rootfs: RootFSConfig,
 }
 
-pub fn eval_config(base_config_path: impl AsRef<Path>, target_arch: String) -> Result<(Config, RootFSConfig), ConfigError> {
+pub fn eval_config(
+    base_config_path: impl AsRef<Path>,
+    target_arch: String,
+    options: HashMap<String, String>,
+) -> Result<(Config, RootFSConfig), ConfigError> {
     let base_config_text = read_to_string(&base_config_path).map_err(|err| {
         ConfigError::ReadBaseConfig(FileSystemError::ReadFile {
             path: base_config_path.as_ref().to_path_buf(),
@@ -62,7 +66,7 @@ pub fn eval_config(base_config_path: impl AsRef<Path>, target_arch: String) -> R
     };
 
     let lua_path = base_config.lua_root.unwrap_or(PathBuf::from(DEFAULT_MAIN_CONFIG_PATH));
-    let config = eval_lua_config(&lua_path, global_environment)?;
+    let config = eval_lua_config(&lua_path, global_environment, options)?;
 
     Ok((config, base_config.rootfs))
 }

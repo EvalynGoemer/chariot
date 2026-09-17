@@ -72,6 +72,9 @@ struct InstallOptions {
     #[arg(long, env = "CHARIOT_ARCH", help = "target architecture")]
     arch: String,
 
+    #[arg(long, env = "CHARIOT_OPTIONS", help = "options", value_parser = parse_kv, value_delimiter = ',')]
+    options: Vec<(String, String)>,
+
     #[arg(long, help = "install a host package (tool)")]
     tool: bool,
 
@@ -83,6 +86,11 @@ struct InstallOptions {
 
     #[arg(required = true, help = "package install destination")]
     dest: String,
+}
+
+fn parse_kv(str: &str) -> Result<(String, String), String> {
+    let pos = str.find('=').ok_or_else(|| format!("invalid KEY=VALUE: no `=` found in `{}`", str))?;
+    Ok((str[..pos].to_string(), str[pos + 1..].to_string()))
 }
 
 pub fn run_cli() -> Result<()> {
@@ -101,7 +109,8 @@ pub fn run_cli() -> Result<()> {
         }
     };
 
-    let (config, rootfs_config) = eval_config(opts.config, install_opts.arch).context("Failed to evaluate config")?;
+    let (config, rootfs_config) =
+        eval_config(opts.config, install_opts.arch, HashMap::from_iter(install_opts.options)).context("Failed to evaluate config")?;
 
     let rootfs = match RootFS::get(&opts.rootfs).context("Failed to get rootfs")? {
         None => {

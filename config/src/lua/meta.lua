@@ -48,6 +48,7 @@
 ---@class ChariotAPI
 ---@field target_prefix string
 ---@field target_arch string
+---@field options table<string, string>
 chariot = {}
 
 --- Reads a file's contents from disk.
