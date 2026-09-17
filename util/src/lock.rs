@@ -14,10 +14,10 @@ use thiserror::Error;
 use crate::fs::FileSystemError;
 
 #[derive(Error, Debug)]
-#[error("Failed to acquire an `{}` on `{}`", kind, path.display())]
+#[error("Failed to acquire an `{}`{}", kind, match path { Some(path) => format!("on `{}`", path.display()), None => String::from("")})]
 pub struct FileLockError {
     pub kind: FileLockKind,
-    pub path: PathBuf,
+    pub path: Option<PathBuf>,
     pub source: Errno,
 }
 
@@ -35,7 +35,6 @@ pub struct LockShared;
 pub struct DirLock<LockType> {
     _lock_type: PhantomData<LockType>,
     lock: Flock<File>,
-    path: PathBuf,
 }
 
 impl Display for FileLockKind {
@@ -74,7 +73,6 @@ impl DirLock<LockShared> {
         Ok(DirLock {
             _lock_type: PhantomData,
             lock: self.lock,
-            path: self.path,
         })
     }
 
@@ -83,7 +81,6 @@ impl DirLock<LockShared> {
         Ok(DirLock {
             _lock_type: PhantomData,
             lock: self.lock,
-            path: self.path,
         })
     }
 }
@@ -102,7 +99,6 @@ impl DirLock<LockExclusive> {
         Ok(DirLock {
             _lock_type: PhantomData,
             lock: self.lock,
-            path: self.path,
         })
     }
 
@@ -111,7 +107,6 @@ impl DirLock<LockExclusive> {
         Ok(DirLock {
             _lock_type: PhantomData,
             lock: self.lock,
-            path: self.path,
         })
     }
 }
@@ -122,14 +117,13 @@ impl<LockType> DirLock<LockType> {
         Ok(Self {
             _lock_type: PhantomData,
             lock,
-            path: path.as_ref().to_path_buf(),
         })
     }
 
     fn relock(&self, kind: FileLockKind) -> Result<(), FileSystemError> {
         self.lock.relock((&kind).into()).map_err(|err| FileLockError {
             kind,
-            path: self.path.clone(),
+            path: None,
             source: err,
         })?;
 
@@ -155,7 +149,7 @@ pub fn open_file_locked(path: impl AsRef<Path>, open_options: &OpenOptions, kind
 
     let locked_file = Flock::lock(file, (&kind).into()).map_err(|(_, errno)| FileLockError {
         kind,
-        path: path.as_ref().to_path_buf(),
+        path: Some(path.as_ref().to_path_buf()),
         source: errno,
     })?;
 
