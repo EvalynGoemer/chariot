@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fs::{create_dir_all, exists, read_to_string, write},
     io::{self, stdout},
     path::{Path, PathBuf},
@@ -9,10 +9,14 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use chariot_config::eval_config;
+use chariot_config::{DEFAULT_BASE_CONFIG_PATH, DEFAULT_LUA_CONFIG_PATH, base::read_base_config, lua::eval_lua_config};
 use chariot_core::{
-    CoreContext, HOST_ARCH, collect_all_hashes, config::package::PackagePlatform, dependencies::resolve_repos_for_pkg, store::Store,
-    workdir::WorkDirectoryParent, xbps::package_install,
+    CoreContext, DEFAULT_TARGET_PREFIX, collect_all_hashes,
+    config::{GlobalEnvironment, package::PackagePlatform},
+    dependencies::resolve_repos_for_pkg,
+    store::Store,
+    workdir::WorkDirectoryParent,
+    xbps::package_install,
 };
 use chariot_rootfs::{CachedPkgSet, DEFAULT_MANIFESTS_URL, ManifestFetchSpec, RootFS};
 use chariot_util::fs::make_path;
@@ -34,7 +38,7 @@ const FILENAME_STATE: &str = "state.toml";
 #[derive(Parser)]
 #[command(version, next_line_help = true)]
 struct ChariotOptions {
-    #[arg(long, help = "path to chariot base config", default_value = "chariot_config.toml")]
+    #[arg(long, help = "path to chariot base config", default_value = DEFAULT_BASE_CONFIG_PATH)]
     config: String,
 
     #[arg(long, help = "path to chariot cache", default_value = ".chariot-cache")]
@@ -158,7 +162,22 @@ pub fn run_cli() -> Result<()> {
         write(&state_path, state_data).context("Failed to write state file")?;
     }
 
-    let (config, rootfs_config) = eval_config(&opts.config, install_opts.arch, options).context("Failed to evaluate config")?;
+    let base_config = read_base_config(&opts.config).context("Failed to get base config")?;
+    let target_prefix = base_config.target_prefix.unwrap_or(String::from(DEFAULT_TARGET_PREFIX));
+
+    let global_environment = Arc::new(GlobalEnvironment {
+        global_environment_variables: BTreeMap::new(),
+        rootfs_manifest_hash: base_config.rootfs.hash.clone(),
+        target_prefix: target_prefix.clone(),
+        target_arch: install_opts.arch,
+    });
+
+    let config = eval_lua_config(
+        base_config.lua_root.unwrap_or(PathBuf::from(DEFAULT_LUA_CONFIG_PATH)),
+        global_environment,
+        options,
+    )
+    .context("Failed to evaluate lua config")?;
 
     let rootfs = match RootFS::get(&opts.rootfs).context("Failed to get rootfs")? {
         None => {
@@ -167,7 +186,7 @@ pub fn run_cli() -> Result<()> {
             let pb = ProgressBar::no_length()
                 .with_style(ProgressStyle::with_template("{elapsed:.yellow.light} | {prefix:.bold} {wide_msg:.dim}")?)
                 .with_message("Downloading...")
-                .with_prefix(format!("Initializing rootfs `{}`", rootfs_config.version));
+                .with_prefix(format!("Initializing rootfs `{}`", base_config.rootfs.version));
             pb.enable_steady_tick(Duration::from_millis(100));
 
             let mut pb_writer = ProgressBarWriter::init(&pb);
@@ -175,9 +194,9 @@ pub fn run_cli() -> Result<()> {
             let rootfs = RootFS::init(
                 &opts.rootfs,
                 &ManifestFetchSpec {
-                    url: rootfs_config.url.unwrap_or(String::from(DEFAULT_MANIFESTS_URL)),
-                    version: rootfs_config.version,
-                    hash: rootfs_config.hash,
+                    url: base_config.rootfs.url.unwrap_or(String::from(DEFAULT_MANIFESTS_URL)),
+                    version: base_config.rootfs.version,
+                    hash: base_config.rootfs.hash.clone(),
                 },
                 &mut pb_writer,
             )
@@ -192,14 +211,14 @@ pub fn run_cli() -> Result<()> {
             let hash = &rootfs.get_manifest_spec().hash;
             let version = &rootfs.get_manifest_spec().version;
 
-            let version_match = version == &rootfs_config.version;
-            let hash_match = hash == &rootfs_config.hash;
+            let version_match = version == &base_config.rootfs.version;
+            let hash_match = hash == &base_config.rootfs.hash;
 
             if !version_match && !hash_match {
                 bail!(
                     "Rootfs version mismatch (current `{}`, wanted `{}). Delete current rootfs at convenience",
                     hash,
-                    rootfs_config.hash
+                    base_config.rootfs.hash
                 );
             }
 
@@ -208,7 +227,7 @@ pub fn run_cli() -> Result<()> {
             }
 
             if !hash_match {
-                bail!("Rootfs hash mismatch, expected `{}`, got `{}`", rootfs_config.hash, hash);
+                bail!("Rootfs hash mismatch, expected `{}`, got `{}`", base_config.rootfs.hash, hash);
             }
 
             rootfs
@@ -286,10 +305,7 @@ pub fn run_cli() -> Result<()> {
             &selected_package.name,
             &selected_package.version,
             selected_package.revision,
-            match selected_package.platform {
-                PackagePlatform::Host => HOST_ARCH,
-                PackagePlatform::Target => &selected_package.global_env.target_arch,
-            },
+            selected_package.get_arch(),
             entries.iter().map(|entry| entry.path()).collect(),
             &PathBuf::from(&install_opts.dest),
             false,
@@ -298,15 +314,25 @@ pub fn run_cli() -> Result<()> {
         )?;
     }
 
-    prune_store(&store, state, opts.config)?;
+    prune_store(&store, state, base_config.rootfs.hash, target_prefix, &opts.config)?;
 
     Ok(())
 }
 
-fn prune_store(store: &Arc<Store>, state: State, config_path: impl AsRef<Path>) -> Result<()> {
+fn prune_store(store: &Arc<Store>, state: State, rootfs_manifest_hash: String, target_prefix: String, config_path: impl AsRef<Path>) -> Result<()> {
     let mut all_hashes = HashSet::new();
     for input_state in state.known_input_states {
-        let (config, _) = eval_config(&config_path, input_state.arch, input_state.options).context("Failed to evaluate config")?;
+        let config = eval_lua_config(
+            &config_path,
+            Arc::new(GlobalEnvironment {
+                global_environment_variables: BTreeMap::new(),
+                rootfs_manifest_hash: rootfs_manifest_hash.clone(),
+                target_arch: input_state.arch,
+                target_prefix: target_prefix.clone(),
+            }),
+            input_state.options,
+        )
+        .context("Failed to evaluate config")?;
         let hashes = collect_all_hashes(&config);
         all_hashes.extend(hashes.iter());
     }

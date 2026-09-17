@@ -57,9 +57,11 @@ fn parse_dependencies_table(table: Table) -> Result<Dependencies, mlua::Error> {
     Ok(dependencies)
 }
 
-pub fn eval_lua_config(path: &Path, global_environment: GlobalEnvironment, options: HashMap<String, String>) -> Result<Config, mlua::Error> {
-    let global_environment = Arc::new(global_environment);
-
+pub fn eval_lua_config(
+    path: impl AsRef<Path>,
+    global_environment: Arc<GlobalEnvironment>,
+    options: HashMap<String, String>,
+) -> Result<Config, mlua::Error> {
     let lua = Lua::new_with(StdLib::MATH | StdLib::STRING | StdLib::TABLE | StdLib::PACKAGE, LuaOptions::new())?;
 
     lua.set_app_data(ChariotAppData {
@@ -219,7 +221,7 @@ pub fn eval_lua_config(path: &Path, global_environment: GlobalEnvironment, optio
     lua.load(EMBEDDED_LUA_FILE_BUILTINS).set_name("=chariot_builtins").exec()?;
     lua.load(EMBEDDED_LUA_FILE_HELPERS).set_name("=chariot_helpers").exec()?;
 
-    lua.load(path).exec()?;
+    lua.load(path.as_ref()).exec()?;
 
     let app_data = lua.remove_app_data::<ChariotAppData>().unwrap();
 

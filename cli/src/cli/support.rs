@@ -1,7 +1,7 @@
 use std::{fs::write, path::PathBuf};
 
 use anyhow::{Context, Result};
-use chariot_config::{EMBEDDED_LUA_FILE_BUILTINS, EMBEDDED_LUA_FILE_HELPERS, EMBEDDED_LUA_FILE_META};
+use chariot_config::lua::{EMBEDDED_LUA_FILE_BUILTINS, EMBEDDED_LUA_FILE_HELPERS, EMBEDDED_LUA_FILE_META};
 use chariot_util::fs::make_path;
 use log::info;
 
