@@ -40,6 +40,12 @@
 
                     nativeBuildInputs = with pkgs; [ installShellFiles ];
 
+                    postInstall = ''
+                        installShellCompletion --name chariot.bash --bash <($out/bin/chariot support completions bash)
+                        installShellCompletion --name chariot.fish --fish <($out/bin/chariot support completions fish)
+                        installShellCompletion --name __chariot --zsh <($out/bin/chariot support completions zsh)
+                    '';
+
                     meta = {
                         description = "Modern meta build system for bootstrapping operating system distributions.";
                         homepage = "https://github.com/elysium-os/chariot";
