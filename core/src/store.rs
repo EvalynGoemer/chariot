@@ -30,7 +30,7 @@ impl Store {
         self.path.join(format!("{}-{:x}", category, hash))
     }
 
-    pub fn prune_store(&self, exclude: HashSet<(&str, u64)>) -> Result<(), FileSystemError> {
+    pub fn prune_store(&self, exclude: HashSet<(&str, u128)>) -> Result<(), FileSystemError> {
         let _store_lock = DirLock::exclusive(&self.path)?;
 
         for entry in dir_entries(&self.path)? {
