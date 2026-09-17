@@ -1,5 +1,3 @@
---- @module "defs"
-
 --- Create an archive source table.
 --- @param url string
 --- @param checksum string
@@ -7,6 +5,14 @@
 --- @param compression string?
 --- @return ArchiveSource
 function Archive(url, checksum, kind, compression)
+    if type(url) ~= "string" then
+        error("archive url must be a string")
+    end
+
+    if type(checksum) ~= "string" then
+        error("archive checksum must be a string")
+    end
+
     if kind == nil then
         local urlParts = url:split(".")
         if #urlParts >= 2 then
@@ -47,6 +53,14 @@ end
 --- @param revision string
 --- @return GitSource
 function Git(url, revision)
+    if type(url) ~= "string" then
+        error("git url must be a string")
+    end
+
+    if type(revision) ~= "string" then
+        error("git revision must be a string")
+    end
+
     return {
         type = "git",
         url = url,

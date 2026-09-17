@@ -167,6 +167,7 @@ dependencies = [
  "chariot_config",
  "chariot_core",
  "chariot_rootfs",
+ "chariot_util",
  "clap",
  "colored",
  "indicatif",

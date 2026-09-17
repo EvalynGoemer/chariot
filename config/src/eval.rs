@@ -11,7 +11,11 @@ use chariot_core::config::{
     script::{Script, ScriptLanguage},
     source::{Archive, ArchiveCompression, ArchiveKind, GitSource, Source, SourceBase, SourcePrepare},
 };
-use mlua::{Error, ErrorContext, Lua, Table, UserData, Value};
+use mlua::{Error, ErrorContext, Lua, LuaOptions, StdLib, Table, UserData, Value};
+
+pub const EMBEDDED_LUA_FILE_META: &str = include_str!("./lua/meta.lua");
+pub const EMBEDDED_LUA_FILE_BUILTINS: &str = include_str!("./lua/builtins.lua");
+pub const EMBEDDED_LUA_FILE_HELPERS: &str = include_str!("./lua/helpers.lua");
 
 #[derive(Debug)]
 struct ChariotAppData {
@@ -56,7 +60,7 @@ fn parse_dependencies_table(table: Table) -> Result<Dependencies, mlua::Error> {
 pub fn eval_lua_config(path: &Path, global_environment: GlobalEnvironment) -> Result<Config, mlua::Error> {
     let global_environment = Arc::new(global_environment);
 
-    let lua = Lua::new();
+    let lua = Lua::new_with(StdLib::MATH | StdLib::STRING | StdLib::TABLE | StdLib::PACKAGE, LuaOptions::new())?;
 
     lua.set_app_data(ChariotAppData {
         sources: Vec::new(),
@@ -64,6 +68,8 @@ pub fn eval_lua_config(path: &Path, global_environment: GlobalEnvironment) -> Re
     });
 
     let chariot_table = lua.create_table()?;
+    chariot_table.set("target_prefix", lua.create_string(&global_environment.target_prefix)?)?;
+    chariot_table.set("target_arch", lua.create_string(&global_environment.target_arch)?)?;
     chariot_table.set(
         "read_file",
         lua.create_function(|_, path: PathBuf| Ok(read_to_string(path).map_err(|err| Error::ExternalError(Arc::new(err)))?))?,
@@ -204,8 +210,8 @@ pub fn eval_lua_config(path: &Path, global_environment: GlobalEnvironment) -> Re
     let globals = lua.globals();
     globals.set("chariot", chariot_table)?;
 
-    lua.load(include_str!("lua/generics.lua")).set_name("=chariot_generics").exec()?;
-    lua.load(include_str!("lua/builtin.lua")).set_name("=chariot_builtins").exec()?;
+    lua.load(EMBEDDED_LUA_FILE_BUILTINS).set_name("=chariot_builtins").exec()?;
+    lua.load(EMBEDDED_LUA_FILE_HELPERS).set_name("=chariot_helpers").exec()?;
 
     lua.load(path).exec()?;
 

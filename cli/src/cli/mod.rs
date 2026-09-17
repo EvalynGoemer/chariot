@@ -18,7 +18,9 @@ use clap::{Args, Parser, Subcommand};
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{info, warn};
 
-use crate::util::ProgressBarWriter;
+use crate::{cli::support::setup_lua_lsp, util::ProgressBarWriter};
+
+mod support;
 
 #[derive(Parser)]
 #[command(version, next_line_help = true)]
@@ -41,8 +43,20 @@ struct ChariotOptions {
 
 #[derive(Subcommand)]
 enum MainCommand {
+    #[command(about = "miscellaneous support tooling")]
+    Support {
+        #[command(subcommand)]
+        command: SupportCommand,
+    },
+
     #[command(about = "install package")]
     Install(InstallOptions),
+}
+
+#[derive(Subcommand)]
+enum SupportCommand {
+    #[command(about = "generate lua lsp configuration")]
+    SetupLSP,
 }
 
 #[derive(Args)]
@@ -62,6 +76,13 @@ struct InstallOptions {
 
 pub fn run_cli() -> Result<()> {
     let opts = ChariotOptions::parse();
+
+    let install_opts = match opts.command {
+        MainCommand::Install(install_opts) => install_opts,
+        MainCommand::Support {
+            command: SupportCommand::SetupLSP,
+        } => return setup_lua_lsp(),
+    };
 
     let (config, rootfs_config) = eval_config(opts.config, opts.arch).context("Failed to evaluate config")?;
 
@@ -154,54 +175,50 @@ pub fn run_cli() -> Result<()> {
         rootfs,
     };
 
-    match opts.command {
-        MainCommand::Install(install_opts) => {
-            let mut selected_packages = Vec::new();
-            for package in install_opts.packages {
-                let selected_package = config.packages.iter().find(|pkg| {
-                    pkg.name == package
-                        && pkg.platform
-                            == match install_opts.tool {
-                                true => PackagePlatform::Host,
-                                false => PackagePlatform::Target,
-                            }
-                });
+    let mut selected_packages = Vec::new();
+    for package in install_opts.packages {
+        let selected_package = config.packages.iter().find(|pkg| {
+            pkg.name == package
+                && pkg.platform
+                    == match install_opts.tool {
+                        true => PackagePlatform::Host,
+                        false => PackagePlatform::Target,
+                    }
+        });
 
-                selected_packages.push(match selected_package {
-                    None => bail!(
-                        "Could not find a {} with the name `{}`",
-                        match install_opts.tool {
-                            true => "tool",
-                            false => "package",
-                        },
-                        package
-                    ),
-                    Some(pkg) => pkg,
-                });
-            }
+        selected_packages.push(match selected_package {
+            None => bail!(
+                "Could not find a {} with the name `{}`",
+                match install_opts.tool {
+                    true => "tool",
+                    false => "package",
+                },
+                package
+            ),
+            Some(pkg) => pkg,
+        });
+    }
 
-            create_dir_all(&install_opts.dest)?;
+    create_dir_all(&install_opts.dest)?;
 
-            for selected_package in selected_packages {
-                let entries = resolve_repos_for_pkg(&ctx, &mut stdout(), selected_package)?;
+    for selected_package in selected_packages {
+        let entries = resolve_repos_for_pkg(&ctx, &mut stdout(), selected_package)?;
 
-                package_install(
-                    &ctx,
-                    &selected_package.name,
-                    &selected_package.version,
-                    selected_package.revision,
-                    match selected_package.platform {
-                        PackagePlatform::Host => HOST_ARCH,
-                        PackagePlatform::Target => &selected_package.global_env.target_arch,
-                    },
-                    entries.iter().map(|entry| entry.path()).collect(),
-                    &PathBuf::from(&install_opts.dest),
-                    false,
-                    install_opts.force,
-                    &mut stdout(),
-                )?;
-            }
-        }
+        package_install(
+            &ctx,
+            &selected_package.name,
+            &selected_package.version,
+            selected_package.revision,
+            match selected_package.platform {
+                PackagePlatform::Host => HOST_ARCH,
+                PackagePlatform::Target => &selected_package.global_env.target_arch,
+            },
+            entries.iter().map(|entry| entry.path()).collect(),
+            &PathBuf::from(&install_opts.dest),
+            false,
+            install_opts.force,
+            &mut stdout(),
+        )?;
     }
 
     Ok(())

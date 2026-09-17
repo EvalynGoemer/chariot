@@ -13,6 +13,7 @@ use serde::Deserialize;
 use thiserror::Error;
 
 use crate::eval::eval_lua_config;
+pub use crate::eval::{EMBEDDED_LUA_FILE_BUILTINS, EMBEDDED_LUA_FILE_HELPERS, EMBEDDED_LUA_FILE_META};
 
 mod eval;
 

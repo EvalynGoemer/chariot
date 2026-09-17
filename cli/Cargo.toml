@@ -5,6 +5,7 @@ version.workspace = true
 authors.workspace = true
 
 [dependencies]
+chariot_util.workspace = true
 chariot_config.workspace = true
 chariot_core.workspace = true
 chariot_rootfs.workspace = true
