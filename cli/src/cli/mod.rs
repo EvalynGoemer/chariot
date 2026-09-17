@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeSet, HashMap},
     fs::create_dir_all,
-    io::stdout,
+    io::{self, stdout},
     path::PathBuf,
     sync::Arc,
     thread::available_parallelism,
@@ -14,7 +14,8 @@ use chariot_core::{
     CoreContext, HOST_ARCH, cache::Cache, config::package::PackagePlatform, dependencies::resolve_repos_for_pkg, xbps::package_install,
 };
 use chariot_rootfs::{CachedPkgSet, DEFAULT_MANIFESTS_URL, ManifestFetchSpec, RootFS};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand, value_parser};
+use clap_complete::{Shell, generate};
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{info, warn};
 
@@ -57,6 +58,12 @@ enum MainCommand {
 enum SupportCommand {
     #[command(about = "generate lua lsp configuration")]
     SetupLSP,
+
+    #[command(about = "generate shell completions for chariot")]
+    Completions {
+        #[arg(help = "shell to generate completions for", value_parser = value_parser!(Shell))]
+        shell: Shell,
+    },
 }
 
 #[derive(Args)]
@@ -82,6 +89,12 @@ pub fn run_cli() -> Result<()> {
         MainCommand::Support {
             command: SupportCommand::SetupLSP,
         } => return setup_lua_lsp(),
+        MainCommand::Support {
+            command: SupportCommand::Completions { shell },
+        } => {
+            generate(shell, &mut ChariotOptions::command(), "chariot".to_string(), &mut io::stdout());
+            return Ok(());
+        }
     };
 
     let (config, rootfs_config) = eval_config(opts.config, opts.arch).context("Failed to evaluate config")?;
