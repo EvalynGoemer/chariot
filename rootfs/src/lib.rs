@@ -35,6 +35,8 @@ mod state;
 
 pub const DEFAULT_MANIFESTS_URL: &str = "https://cdn.chariot-build.dev/manifests/x86_64/@VERSION@.toml";
 
+/// Describes the version of the on-disk rootfs. If the on-disk representation
+/// changes in a backwards incompatible way, this version should be bumped.
 const ROOTFS_VERSION: i64 = 3;
 
 #[derive(Debug, Error)]

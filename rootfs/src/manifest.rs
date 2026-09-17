@@ -12,6 +12,8 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use url::Url;
 
+/// Describes the manifest version. If the manifest format changes
+/// in a backwards incompatible way, this version should be bumped.
 pub const ROOTFS_MANIFEST_VERSION: i64 = 4;
 
 const MANIFEST_URL_VERSION_PLACEHOLDER: &str = "@VERSION@";
