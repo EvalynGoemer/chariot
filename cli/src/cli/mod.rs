@@ -29,9 +29,6 @@ struct ChariotOptions {
     #[arg(long, help = "path to chariot base config", default_value = "chariot_config.toml")]
     config: String,
 
-    #[arg(long, env = "CHARIOT_ARCH", help = "target architecture")]
-    arch: String,
-
     #[arg(long, help = "path to chariot cache", default_value = ".chariot-cache")]
     cache: String,
 
@@ -68,6 +65,9 @@ enum SupportCommand {
 
 #[derive(Args)]
 struct InstallOptions {
+    #[arg(long, env = "CHARIOT_ARCH", help = "target architecture")]
+    arch: String,
+
     #[arg(long, help = "install a host package (tool)")]
     tool: bool,
 
@@ -97,7 +97,7 @@ pub fn run_cli() -> Result<()> {
         }
     };
 
-    let (config, rootfs_config) = eval_config(opts.config, opts.arch).context("Failed to evaluate config")?;
+    let (config, rootfs_config) = eval_config(opts.config, install_opts.arch).context("Failed to evaluate config")?;
 
     let rootfs = match RootFS::get(&opts.rootfs).context("Failed to get rootfs")? {
         None => {
