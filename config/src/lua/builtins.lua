@@ -26,3 +26,11 @@ function string.split(str, separator)
 
     return t
 end
+
+--- Print table keys and values.
+--- @param table table
+function table.print(table)
+    for k, v in pairs(table) do
+        print(k .. "=" .. v)
+    end
+end
