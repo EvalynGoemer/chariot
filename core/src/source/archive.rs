@@ -13,11 +13,11 @@ use thiserror::Error;
 
 use crate::{
     CoreContext,
-    cache::WorkDirectory,
     config::{
         script::Script,
         source::{Archive, ArchiveCompression, ArchiveKind},
     },
+    workdir::WorkDirectory,
 };
 
 #[derive(Debug, Error)]
@@ -39,7 +39,7 @@ pub enum ArchiveFetchError {
 }
 
 pub fn fetch_archive(ctx: &CoreContext, logger: &mut dyn Write, archive: &Archive) -> Result<WorkDirectory, ArchiveFetchError> {
-    let download_dir = WorkDirectory::create(&ctx.cache)?;
+    let download_dir = WorkDirectory::create(&ctx.workdir_parent)?;
     let archive_path = download_dir.path().join("archive");
 
     File::create(&archive_path).map_err(|err| FileSystemError::CreateFile {
@@ -57,7 +57,7 @@ pub fn fetch_archive(ctx: &CoreContext, logger: &mut dyn Write, archive: &Archiv
         &archive_path,
     )?;
 
-    let work_directory = WorkDirectory::create(&ctx.cache)?;
+    let work_directory = WorkDirectory::create(&ctx.workdir_parent)?;
     extract_archive(
         &ctx.rootfs,
         ctx.bsdtar_pkgset.as_deref(),

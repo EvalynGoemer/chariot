@@ -6,10 +6,11 @@ use thiserror::Error;
 
 use crate::{
     CoreContext, HOST_ARCH, HOST_PREFIX,
-    cache::{StoreEntry, WorkDirectory},
     config::package::{Package, PackagePlatform},
     dependencies::{ResolveDependenciesError, resolve_dependencies},
     source::SourceFetchError,
+    store::StoreEntry,
+    workdir::WorkDirectory,
     xbps::{XBPSPackageCreateError, package_create},
 };
 
@@ -42,7 +43,7 @@ pub enum ProcessPackageError {
 
 pub fn process_package(ctx: &CoreContext, logger: &mut dyn Write, package: &Package) -> Result<StoreEntry, ProcessPackageError> {
     let pkg_hash = package.get_package_hash();
-    if let Some(store_entry) = StoreEntry::get(&ctx.cache, "pkg", pkg_hash)? {
+    if let Some(store_entry) = StoreEntry::get(&ctx.store, "pkg", pkg_hash)? {
         return Ok(store_entry);
     }
 
@@ -54,7 +55,7 @@ pub fn process_package(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
         .map(|pkg| format!("{}>={}_{}", pkg.name, pkg.version, pkg.revision))
         .collect::<Vec<_>>();
 
-    let workdir = WorkDirectory::create(&ctx.cache)?;
+    let workdir = WorkDirectory::create(&ctx.workdir_parent)?;
     package_create(
         ctx,
         &package.name,
@@ -70,19 +71,19 @@ pub fn process_package(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
         logger,
     )?;
 
-    Ok(workdir.move_to_store("pkg", pkg_hash)?)
+    Ok(StoreEntry::from_workdir(&ctx.store, workdir, "pkg", pkg_hash)?)
 }
 
 fn get_package_install(ctx: &CoreContext, logger: &mut dyn Write, package: &Package) -> Result<StoreEntry, ProcessPackageError> {
     let pkg_content_hash = package.get_content_hash();
 
-    if let Some(store_entry) = StoreEntry::get(&ctx.cache, "install", pkg_content_hash)? {
+    if let Some(store_entry) = StoreEntry::get(&ctx.store, "install", pkg_content_hash)? {
         return Ok(store_entry);
     }
 
     let exec_env = resolve_dependencies(ctx, logger, &package.dependencies).map_err(|err| Box::new(err))?;
 
-    let build_workdir = WorkDirectory::create(&ctx.cache)?;
+    let build_workdir = WorkDirectory::create(&ctx.workdir_parent)?;
 
     let build_mount = Mount {
         dest: PathBuf::from("/chariot/build"),
@@ -134,7 +135,7 @@ fn get_package_install(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
         }
     }
 
-    let install_workdir = WorkDirectory::create(&ctx.cache)?;
+    let install_workdir = WorkDirectory::create(&ctx.workdir_parent)?;
 
     let exit_code = exec_env.exec(
         "/chariot/build",
@@ -158,5 +159,5 @@ fn get_package_install(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
         return Err(ProcessPackageError::Install(exit_code));
     }
 
-    Ok(install_workdir.move_to_store("install", pkg_content_hash)?)
+    Ok(StoreEntry::from_workdir(&ctx.store, install_workdir, "install", pkg_content_hash)?)
 }

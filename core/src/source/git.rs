@@ -6,8 +6,8 @@ use thiserror::Error;
 
 use crate::{
     CoreContext,
-    cache::WorkDirectory,
     config::{script::Script, source::GitSource},
+    workdir::WorkDirectory,
 };
 
 #[derive(Debug, Error)]
@@ -35,7 +35,7 @@ pub enum GitFetchError {
 }
 
 pub fn fetch_git_repository(ctx: &CoreContext, logger: &mut dyn Write, git_source: &GitSource) -> Result<WorkDirectory, GitFetchError> {
-    let work_directory = WorkDirectory::create(&ctx.cache)?;
+    let work_directory = WorkDirectory::create(&ctx.workdir_parent)?;
 
     let source_bind = Mount {
         dest: PathBuf::from("/chariot/source"),

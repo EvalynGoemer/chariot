@@ -2,17 +2,16 @@ use std::{collections::HashSet, sync::Arc};
 
 use chariot_rootfs::{CachedPkgSet, RootFS};
 
-use crate::{cache::Cache, config::Config};
+use crate::{config::Config, store::Store, workdir::WorkDirectoryParent};
 
-pub mod cache;
 pub mod config;
 pub mod dependencies;
 mod execenv;
 pub mod package;
 pub mod source;
+pub mod store;
+pub mod workdir;
 pub mod xbps;
-
-pub const CACHE_VERSION: i64 = 5;
 
 pub const HOST_ARCH: &str = "x86_64";
 pub const NOARCH_ARCH: &str = "noarch";
@@ -23,7 +22,8 @@ pub const DEFAULT_TARGET_PREFIX: &str = "/usr";
 pub struct CoreContext {
     pub parallelism: usize,
     pub rootfs: Arc<RootFS>,
-    pub cache: Arc<Cache>,
+    pub store: Arc<Store>,
+    pub workdir_parent: Arc<WorkDirectoryParent>,
     pub root_pkgset: Option<Arc<CachedPkgSet>>,
     pub git_pkgset: Option<Arc<CachedPkgSet>>,
     pub wget_pkgset: Option<Arc<CachedPkgSet>>,

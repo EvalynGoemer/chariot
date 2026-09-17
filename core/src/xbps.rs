@@ -9,7 +9,7 @@ use chariot_runtime::{Mount, MountKind, RuntimeError};
 use chariot_util::fs::FileSystemError;
 use thiserror::Error;
 
-use crate::{CoreContext, cache::WorkDirectory};
+use crate::{CoreContext, workdir::WorkDirectory};
 
 #[derive(Debug, Error)]
 pub enum XBPSValidationError {
@@ -220,7 +220,7 @@ pub fn package_install(
     let mut _workdir = None;
     let rootfs_overlay = match dest_root_overlay {
         true => {
-            let overlay_workdir = WorkDirectory::create(&ctx.cache)?;
+            let overlay_workdir = WorkDirectory::create(&ctx.workdir_parent)?;
             let overlay = RootFSOverlay::ReadWrite {
                 path: dest_dir.to_path_buf(),
                 work_path: overlay_workdir.path(),

@@ -6,7 +6,6 @@ use thiserror::Error;
 
 use crate::{
     CoreContext, HOST_ARCH,
-    cache::{StoreEntry, WorkDirectory},
     config::{
         Dependencies,
         package::{Package, PackagePlatform},
@@ -14,6 +13,8 @@ use crate::{
     execenv::ExecEnv,
     package::{ProcessPackageError, process_package},
     source::fetch_source,
+    store::StoreEntry,
+    workdir::WorkDirectory,
     xbps::{XBPSPackageInstallError, package_install},
 };
 
@@ -66,7 +67,7 @@ pub fn resolve_dependencies<'a>(
         logger,
     )?;
 
-    let sysroot_workdir = WorkDirectory::create(&ctx.cache)?;
+    let sysroot_workdir = WorkDirectory::create(&ctx.workdir_parent)?;
     for pkg in &dependencies.packages {
         assert!(pkg.platform == PackagePlatform::Target);
         let entries = resolve_repos_for_pkg(ctx, logger, pkg)?;
@@ -85,7 +86,7 @@ pub fn resolve_dependencies<'a>(
     }
 
     let tool_overlay_workdir = if dependencies.tools.len() > 0 {
-        let tool_overlay_workdir = WorkDirectory::create(&ctx.cache)?;
+        let tool_overlay_workdir = WorkDirectory::create(&ctx.workdir_parent)?;
         for tool in &dependencies.tools {
             assert!(tool.platform == PackagePlatform::Host);
             let entries = resolve_repos_for_pkg(ctx, logger, tool)?;

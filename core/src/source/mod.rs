@@ -6,7 +6,6 @@ use thiserror::Error;
 
 use crate::{
     CoreContext,
-    cache::{StoreEntry, WorkDirectory},
     config::{
         script::Script,
         source::{Source, SourceBase},
@@ -16,6 +15,8 @@ use crate::{
         archive::{ArchiveFetchError, fetch_archive},
         git::{GitFetchError, fetch_git_repository},
     },
+    store::StoreEntry,
+    workdir::WorkDirectory,
 };
 
 mod archive;
@@ -49,22 +50,26 @@ pub fn fetch_source(ctx: &CoreContext, logger: &mut dyn Write, source: &Source) 
     let mut store_entries = Vec::new();
     let (base_hash, patch_hash, prepare_hash) = source.get_hashes();
 
-    let base_store_entry = match StoreEntry::get(&ctx.cache, "source.base", base_hash)? {
+    let base_store_entry = match StoreEntry::get(&ctx.store, "source.base", base_hash)? {
         Some(store_entry) => store_entry,
-        None => match &source.base {
-            SourceBase::Archive(archive) => fetch_archive(ctx, logger, &archive)?,
-            SourceBase::Git(git_source) => fetch_git_repository(ctx, logger, &git_source)?,
-        }
-        .move_to_store("source.base", base_hash)?,
+        None => StoreEntry::from_workdir(
+            &ctx.store,
+            match &source.base {
+                SourceBase::Archive(archive) => fetch_archive(ctx, logger, &archive)?,
+                SourceBase::Git(git_source) => fetch_git_repository(ctx, logger, &git_source)?,
+            },
+            "source.base",
+            base_hash,
+        )?,
     };
     store_entries.push(base_store_entry);
 
     if source.patches.len() > 0 {
-        let patched_store_entry = match StoreEntry::get(&ctx.cache, "source.patch", patch_hash)? {
+        let patched_store_entry = match StoreEntry::get(&ctx.store, "source.patch", patch_hash)? {
             Some(store_entry) => store_entry,
             None => {
-                let overlay_work_directory = WorkDirectory::create(&ctx.cache)?;
-                let work_directory = WorkDirectory::create(&ctx.cache)?;
+                let overlay_work_directory = WorkDirectory::create(&ctx.workdir_parent)?;
+                let work_directory = WorkDirectory::create(&ctx.workdir_parent)?;
 
                 for patch in &source.patches {
                     let exit_code = ctx.rootfs.exec(
@@ -91,7 +96,7 @@ pub fn fetch_source(ctx: &CoreContext, logger: &mut dyn Write, source: &Source) 
                     }
                 }
 
-                work_directory.move_to_store("source.patch", patch_hash)?
+                StoreEntry::from_workdir(&ctx.store, work_directory, "source.patch", patch_hash)?
             }
         };
         store_entries.push(patched_store_entry);
@@ -100,11 +105,11 @@ pub fn fetch_source(ctx: &CoreContext, logger: &mut dyn Write, source: &Source) 
     if let Some(prepare) = &source.prepare {
         let exec_env = resolve_dependencies(ctx, logger, &prepare.dependencies).map_err(|err| Box::new(err))?;
 
-        let prepare_store_entry = match StoreEntry::get(&ctx.cache, "source.prepare", prepare_hash)? {
+        let prepare_store_entry = match StoreEntry::get(&ctx.store, "source.prepare", prepare_hash)? {
             Some(store_entry) => store_entry,
             None => {
-                let overlay_work_directory = WorkDirectory::create(&ctx.cache)?;
-                let work_directory = WorkDirectory::create(&ctx.cache)?;
+                let overlay_work_directory = WorkDirectory::create(&ctx.workdir_parent)?;
+                let work_directory = WorkDirectory::create(&ctx.workdir_parent)?;
 
                 let exit_code = exec_env.exec(
                     "/chariot/source",
@@ -134,7 +139,7 @@ pub fn fetch_source(ctx: &CoreContext, logger: &mut dyn Write, source: &Source) 
                     return Err(SourceFetchError::Prepare);
                 }
 
-                work_directory.move_to_store("source.prepare", prepare_hash)?
+                StoreEntry::from_workdir(&ctx.store, work_directory, "source.prepare", prepare_hash)?
             }
         };
         store_entries.push(prepare_store_entry);

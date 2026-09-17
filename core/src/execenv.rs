@@ -8,10 +8,7 @@ use std::{
 use chariot_rootfs::{CachedPkgSet, RootFSOverlay};
 use chariot_runtime::{Mount, MountKind, Overlay, RuntimeError};
 
-use crate::{
-    CoreContext,
-    cache::{StoreEntry, WorkDirectory},
-};
+use crate::{CoreContext, store::StoreEntry, workdir::WorkDirectory};
 
 pub struct ExecEnv<'a> {
     pub ctx: &'a CoreContext,

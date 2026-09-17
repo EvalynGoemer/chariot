@@ -11,7 +11,8 @@ use std::{
 use anyhow::{Context, Result, bail};
 use chariot_config::eval_config;
 use chariot_core::{
-    CoreContext, HOST_ARCH, cache::Cache, config::package::PackagePlatform, dependencies::resolve_repos_for_pkg, xbps::package_install,
+    CoreContext, HOST_ARCH, config::package::PackagePlatform, dependencies::resolve_repos_for_pkg, store::Store, workdir::WorkDirectoryParent,
+    xbps::package_install,
 };
 use chariot_rootfs::{CachedPkgSet, DEFAULT_MANIFESTS_URL, ManifestFetchSpec, RootFS};
 use clap::{Args, CommandFactory, Parser, Subcommand, value_parser};
@@ -22,6 +23,9 @@ use log::{info, warn};
 use crate::{cli::support::setup_lua_lsp, util::ProgressBarWriter};
 
 mod support;
+
+const SUBDIR_STORE: &str = "store";
+const SUBDIR_WORKDIRS: &str = "workdirs";
 
 #[derive(Parser)]
 #[command(version, next_line_help = true)]
@@ -154,10 +158,14 @@ pub fn run_cli() -> Result<()> {
         }
     };
 
-    let cache = Cache::get(opts.cache).context("Failed to get cache")?;
+    let cache_path = PathBuf::from(opts.cache);
+
+    let store = Store::get(cache_path.join(SUBDIR_STORE)).context("Failed to get store")?;
+    let workdir_parent = WorkDirectoryParent::get(cache_path.join(SUBDIR_WORKDIRS)).context("Failed to get workdirs")?;
 
     let rootfs = Arc::new(rootfs);
-    let cache = Arc::new(cache);
+    let store = Arc::new(store);
+    let workdir_parent = Arc::new(workdir_parent);
 
     let mut binary_to_pkgset: HashMap<&str, Option<Arc<CachedPkgSet>>> = HashMap::new();
     for binary in ["bsdtar", "git", "patch", "sha256sum", "wget"] {
@@ -184,7 +192,8 @@ pub fn run_cli() -> Result<()> {
         patch_pkgset: binary_to_pkgset.remove("patch").unwrap(),
         sha256sum_pkgset: binary_to_pkgset.remove("sha256sum").unwrap(),
         wget_pkgset: binary_to_pkgset.remove("wget").unwrap(),
-        cache,
+        store,
+        workdir_parent,
         rootfs,
     };
 
