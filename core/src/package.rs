@@ -5,8 +5,8 @@ use chariot_util::fs::FileSystemError;
 use thiserror::Error;
 
 use crate::{
-    CoreContext, HOST_ARCH, HOST_PREFIX,
-    config::package::{Package, PackagePlatform},
+    CoreContext,
+    config::package::Package,
     dependencies::{ResolveDependenciesError, resolve_dependencies},
     source::SourceFetchError,
     store::StoreEntry,
@@ -61,10 +61,7 @@ pub fn process_package(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
         &package.name,
         &package.version,
         package.revision,
-        match package.platform {
-            PackagePlatform::Target => &package.global_env.target_arch,
-            PackagePlatform::Host => HOST_ARCH,
-        },
+        package.get_arch(),
         runtime_deps.iter().map(|str| str.as_str()).collect(),
         &install_store_entry.path(),
         &workdir.path(),
@@ -102,20 +99,8 @@ fn get_package_install(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .chain([
             ("BUILD_DIR", "/chariot/build"),
-            (
-                "PREFIX",
-                match package.platform {
-                    PackagePlatform::Host => HOST_PREFIX,
-                    PackagePlatform::Target => &package.global_env.target_prefix,
-                },
-            ),
-            (
-                "ARCH",
-                match package.platform {
-                    PackagePlatform::Host => HOST_ARCH,
-                    PackagePlatform::Target => &package.global_env.target_arch,
-                },
-            ),
+            ("PREFIX", package.get_prefix()),
+            ("ARCH", package.get_arch()),
         ])
         .collect();
 

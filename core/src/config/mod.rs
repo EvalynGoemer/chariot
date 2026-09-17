@@ -10,7 +10,9 @@ pub mod package;
 pub mod script;
 pub mod source;
 
-const CONFIG_VERSION: u64 = 1;
+/// Describes the config version. If the config format changes
+/// in a backwards incompatible way, this version should be bumped.
+const CONFIG_VERSION: u64 = 2;
 
 #[derive(Debug, Default, Hash)]
 pub struct Dependencies {
