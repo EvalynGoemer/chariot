@@ -1,8 +1,8 @@
 use std::{
-    collections::{BTreeSet, HashMap},
-    fs::create_dir_all,
+    collections::{BTreeSet, HashMap, HashSet},
+    fs::{create_dir_all, exists, read_to_string, write},
     io::{self, stdout},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
     thread::available_parallelism,
     time::Duration,
@@ -11,14 +11,17 @@ use std::{
 use anyhow::{Context, Result, bail};
 use chariot_config::eval_config;
 use chariot_core::{
-    CoreContext, HOST_ARCH, config::package::PackagePlatform, dependencies::resolve_repos_for_pkg, store::Store, workdir::WorkDirectoryParent,
-    xbps::package_install,
+    CoreContext, HOST_ARCH, collect_all_hashes, config::package::PackagePlatform, dependencies::resolve_repos_for_pkg, store::Store,
+    workdir::WorkDirectoryParent, xbps::package_install,
 };
 use chariot_rootfs::{CachedPkgSet, DEFAULT_MANIFESTS_URL, ManifestFetchSpec, RootFS};
+use chariot_util::fs::make_path;
 use clap::{Args, CommandFactory, Parser, Subcommand, value_parser};
 use clap_complete::{Shell, generate};
+use dialoguer::Confirm;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{info, warn};
+use serde::{Deserialize, Serialize};
 
 use crate::{cli::support::setup_lua_lsp, util::ProgressBarWriter};
 
@@ -26,6 +29,7 @@ mod support;
 
 const SUBDIR_STORE: &str = "store";
 const SUBDIR_WORKDIRS: &str = "workdirs";
+const FILENAME_STATE: &str = "state.toml";
 
 #[derive(Parser)]
 #[command(version, next_line_help = true)]
@@ -88,6 +92,17 @@ struct InstallOptions {
     dest: String,
 }
 
+#[derive(Serialize, Deserialize, PartialEq)]
+struct InputState {
+    arch: String,
+    options: HashMap<String, String>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct State {
+    known_input_states: Vec<InputState>,
+}
+
 fn parse_kv(str: &str) -> Result<(String, String), String> {
     let pos = str.find('=').ok_or_else(|| format!("invalid KEY=VALUE: no `=` found in `{}`", str))?;
     Ok((str[..pos].to_string(), str[pos + 1..].to_string()))
@@ -109,8 +124,41 @@ pub fn run_cli() -> Result<()> {
         }
     };
 
-    let (config, rootfs_config) =
-        eval_config(opts.config, install_opts.arch, HashMap::from_iter(install_opts.options)).context("Failed to evaluate config")?;
+    let options = HashMap::from_iter(install_opts.options);
+
+    let cache_path = PathBuf::from(opts.cache);
+    make_path(&cache_path).context("Failed to create cache directory")?;
+
+    let state_path = cache_path.join(FILENAME_STATE);
+    let mut state = if exists(&state_path)? {
+        let state_data = read_to_string(&state_path).context("Failed to read state file")?;
+        toml::from_str::<State>(&state_data).context("Failed to parse state file")?
+    } else {
+        State::default()
+    };
+
+    let input_permutation = InputState {
+        arch: install_opts.arch.clone(),
+        options: options.clone(),
+    };
+
+    if !state.known_input_states.contains(&input_permutation) {
+        let ok = Confirm::new()
+            .default(true)
+            .with_prompt("Detected a new architecture, option (key or value), or permutation of these. Proceed?")
+            .interact()?;
+
+        if !ok {
+            bail!("Canceled by user");
+        }
+
+        state.known_input_states.push(input_permutation);
+
+        let state_data = toml::to_string(&state).context("Failed to serialize state file")?;
+        write(&state_path, state_data).context("Failed to write state file")?;
+    }
+
+    let (config, rootfs_config) = eval_config(&opts.config, install_opts.arch, options).context("Failed to evaluate config")?;
 
     let rootfs = match RootFS::get(&opts.rootfs).context("Failed to get rootfs")? {
         None => {
@@ -167,8 +215,6 @@ pub fn run_cli() -> Result<()> {
         }
     };
 
-    let cache_path = PathBuf::from(opts.cache);
-
     let store = Store::get(cache_path.join(SUBDIR_STORE)).context("Failed to get store")?;
     let workdir_parent = WorkDirectoryParent::get(cache_path.join(SUBDIR_WORKDIRS)).context("Failed to get workdirs")?;
 
@@ -201,7 +247,7 @@ pub fn run_cli() -> Result<()> {
         patch_pkgset: binary_to_pkgset.remove("patch").unwrap(),
         sha256sum_pkgset: binary_to_pkgset.remove("sha256sum").unwrap(),
         wget_pkgset: binary_to_pkgset.remove("wget").unwrap(),
-        store,
+        store: store.clone(),
         workdir_parent,
         rootfs,
     };
@@ -251,6 +297,21 @@ pub fn run_cli() -> Result<()> {
             &mut stdout(),
         )?;
     }
+
+    prune_store(&store, state, opts.config)?;
+
+    Ok(())
+}
+
+fn prune_store(store: &Arc<Store>, state: State, config_path: impl AsRef<Path>) -> Result<()> {
+    let mut all_hashes = HashSet::new();
+    for input_state in state.known_input_states {
+        let (config, _) = eval_config(&config_path, input_state.arch, input_state.options).context("Failed to evaluate config")?;
+        let hashes = collect_all_hashes(&config);
+        all_hashes.extend(hashes.iter());
+    }
+
+    store.prune_store(all_hashes).context("Failed to prune store")?;
 
     Ok(())
 }
