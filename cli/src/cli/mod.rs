@@ -172,12 +172,8 @@ pub fn run_cli() -> Result<()> {
         target_arch: install_opts.arch,
     });
 
-    let config = eval_lua_config(
-        base_config.lua_root.unwrap_or(PathBuf::from(DEFAULT_LUA_CONFIG_PATH)),
-        global_environment,
-        options,
-    )
-    .context("Failed to evaluate lua config")?;
+    let lua_config_path = base_config.lua_root.unwrap_or(PathBuf::from(DEFAULT_LUA_CONFIG_PATH));
+    let config = eval_lua_config(&lua_config_path, global_environment, options).context("Failed to evaluate lua config")?;
 
     let rootfs = match RootFS::get(&opts.rootfs).context("Failed to get rootfs")? {
         None => {
@@ -314,7 +310,7 @@ pub fn run_cli() -> Result<()> {
         )?;
     }
 
-    prune_store(&store, state, base_config.rootfs.hash, target_prefix, &opts.config)?;
+    prune_store(&store, state, base_config.rootfs.hash, target_prefix, &lua_config_path)?;
 
     Ok(())
 }
