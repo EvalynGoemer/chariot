@@ -2,8 +2,14 @@ use std::{collections::HashSet, sync::Arc};
 
 use chariot_rootfs::{CachedPkgSet, RootFS};
 
-use crate::{config::Config, store::Store, workdir::WorkDirectoryParent};
+use crate::{
+    buildcache::BuildCache,
+    config::{Config, package::PackagePlatform},
+    store::Store,
+    workdir::WorkDirectoryParent,
+};
 
+pub mod buildcache;
 pub mod config;
 pub mod dependencies;
 mod execenv;
@@ -20,9 +26,11 @@ pub const HOST_PREFIX: &str = "/usr/local";
 pub const DEFAULT_TARGET_PREFIX: &str = "/usr";
 
 pub struct CoreContext {
+    pub build_cache_enabled: HashSet<(PackagePlatform, String)>,
     pub parallelism: usize,
     pub rootfs: Arc<RootFS>,
     pub store: Arc<Store>,
+    pub build_cache: Arc<BuildCache>,
     pub workdir_parent: Arc<WorkDirectoryParent>,
     pub root_pkgset: Option<Arc<CachedPkgSet>>,
     pub git_pkgset: Option<Arc<CachedPkgSet>>,

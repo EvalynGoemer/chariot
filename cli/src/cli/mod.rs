@@ -11,7 +11,9 @@ use std::{
 use anyhow::{Context, Result, bail};
 use chariot_config::{DEFAULT_BASE_CONFIG_PATH, DEFAULT_LUA_CONFIG_PATH, base::read_base_config, lua::eval_lua_config};
 use chariot_core::{
-    CoreContext, DEFAULT_TARGET_PREFIX, collect_all_hashes,
+    CoreContext, DEFAULT_TARGET_PREFIX,
+    buildcache::BuildCache,
+    collect_all_hashes,
     config::{GlobalEnvironment, package::PackagePlatform},
     dependencies::resolve_repos_for_pkg,
     store::Store,
@@ -27,18 +29,22 @@ use indicatif::{ProgressBar, ProgressStyle};
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 
-use crate::{cli::support::setup_lua_lsp, util::ProgressBarWriter};
+use crate::{cli::support::setup_lua_lsp, config::parse_cli_config, util::ProgressBarWriter};
 
 mod support;
 
 const SUBDIR_STORE: &str = "store";
+const SUBDIR_BUILD_CACHE: &str = "builddirs";
 const SUBDIR_WORKDIRS: &str = "workdirs";
 const FILENAME_STATE: &str = "state.toml";
 
 #[derive(Parser)]
 #[command(version, next_line_help = true)]
 struct ChariotOptions {
-    #[arg(long, help = "path to chariot base config", default_value = DEFAULT_BASE_CONFIG_PATH)]
+    #[arg(long, help = "path to local config", default_value = ".chariot.toml")]
+    local_config: String,
+
+    #[arg(long, help = "path to base config", default_value = DEFAULT_BASE_CONFIG_PATH)]
     config: String,
 
     #[arg(long, help = "path to chariot cache", default_value = ".chariot-cache")]
@@ -115,6 +121,8 @@ fn parse_kv(str: &str) -> Result<(String, String), String> {
 pub fn run_cli() -> Result<()> {
     let opts = ChariotOptions::parse();
 
+    let local_config = parse_cli_config(&opts.local_config).context("Failed to parse local config")?;
+
     let install_opts = match opts.command {
         MainCommand::Install(install_opts) => install_opts,
         MainCommand::Support {
@@ -175,7 +183,7 @@ pub fn run_cli() -> Result<()> {
     let lua_config_path = base_config.lua_root.unwrap_or(PathBuf::from(DEFAULT_LUA_CONFIG_PATH));
     let config = eval_lua_config(&lua_config_path, global_environment, options).context("Failed to evaluate lua config")?;
 
-    let rootfs = match RootFS::get(&opts.rootfs).context("Failed to get rootfs")? {
+    let rootfs = Arc::new(match RootFS::get(&opts.rootfs).context("Failed to get rootfs")? {
         None => {
             info!("No rootfs found");
 
@@ -228,14 +236,11 @@ pub fn run_cli() -> Result<()> {
 
             rootfs
         }
-    };
+    });
 
-    let store = Store::get(cache_path.join(SUBDIR_STORE)).context("Failed to get store")?;
-    let workdir_parent = WorkDirectoryParent::get(cache_path.join(SUBDIR_WORKDIRS)).context("Failed to get workdirs")?;
-
-    let rootfs = Arc::new(rootfs);
-    let store = Arc::new(store);
-    let workdir_parent = Arc::new(workdir_parent);
+    let store = Arc::new(Store::get(cache_path.join(SUBDIR_STORE)).context("Failed to get store")?);
+    let workdir_parent = Arc::new(WorkDirectoryParent::get(cache_path.join(SUBDIR_WORKDIRS)).context("Failed to get workdirs")?);
+    let build_cache = Arc::new(BuildCache::get(cache_path.join(SUBDIR_BUILD_CACHE)).context("Failed to get build cache")?);
 
     let mut binary_to_pkgset: HashMap<&str, Option<Arc<CachedPkgSet>>> = HashMap::new();
     for binary in ["bsdtar", "git", "patch", "sha256sum", "wget"] {
@@ -254,7 +259,20 @@ pub fn run_cli() -> Result<()> {
         pb.finish_and_clear();
     }
 
+    let mut build_cache_enabled = HashSet::new();
+    for (platform, name, pkg) in local_config
+        .pkgs
+        .iter()
+        .map(|(name, pkg)| (PackagePlatform::Target, name, pkg))
+        .chain(local_config.tools.iter().map(|(name, tool)| (PackagePlatform::Host, name, tool)))
+    {
+        if pkg.enable_build_cache {
+            build_cache_enabled.insert((platform, name.clone()));
+        }
+    }
+
     let ctx = CoreContext {
+        build_cache_enabled,
         parallelism: available_parallelism()?.get(),
         root_pkgset: None,
         bsdtar_pkgset: binary_to_pkgset.remove("bsdtar").unwrap(),
@@ -264,6 +282,7 @@ pub fn run_cli() -> Result<()> {
         wget_pkgset: binary_to_pkgset.remove("wget").unwrap(),
         store: store.clone(),
         workdir_parent,
+        build_cache,
         rootfs,
     };
 
@@ -311,6 +330,7 @@ pub fn run_cli() -> Result<()> {
     }
 
     prune_store(&store, state, base_config.rootfs.hash, target_prefix, &lua_config_path)?;
+    ctx.build_cache.prune(ctx.build_cache_enabled)?;
 
     Ok(())
 }

@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use crate::{
     CoreContext,
+    buildcache::BuildDirectory,
     config::package::Package,
     dependencies::{ResolveDependenciesError, resolve_dependencies},
     source::SourceFetchError,
@@ -80,12 +81,28 @@ fn get_package_install(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
 
     let exec_env = resolve_dependencies(ctx, logger, &package.dependencies).map_err(|err| Box::new(err))?;
 
-    let build_workdir = WorkDirectory::create(&ctx.workdir_parent)?;
+    let mut _build_cachedir = None;
+    let mut _build_workdir = None;
+    let build_dir_path = if ctx
+        .build_cache_enabled
+        .iter()
+        .any(|(platform, name)| platform == &package.platform && name == &package.name)
+    {
+        let build_dir = BuildDirectory::get(&ctx.build_cache, package.platform, package.get_arch(), &package.name)?;
+        let path = build_dir.path();
+        _build_cachedir = Some(build_dir);
+        path
+    } else {
+        let workdir = WorkDirectory::create(&ctx.workdir_parent)?;
+        let path = workdir.path();
+        _build_workdir = Some(workdir);
+        path
+    };
 
     let build_mount = Mount {
         dest: PathBuf::from("/chariot/build"),
         kind: MountKind::Bind {
-            from: build_workdir.path(),
+            from: build_dir_path,
             read_only: false,
             is_file: false,
         },

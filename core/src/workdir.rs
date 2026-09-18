@@ -59,6 +59,7 @@ impl WorkDirectory {
             make_path(&path)?;
 
             let lock = match DirLock::exclusive_noblock(&path) {
+                Err(FileSystemError::Open { source, .. }) if source.kind() == ErrorKind::NotFound => continue,
                 result if block_attempted(&result) => continue,
                 result => result,
             }?;

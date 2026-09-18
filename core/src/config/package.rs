@@ -11,10 +11,19 @@ use crate::{
     config::{CONFIG_VERSION, Dependencies, GlobalEnvironment, script::Script},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PackagePlatform {
     Host,
     Target,
+}
+
+impl ToString for PackagePlatform {
+    fn to_string(&self) -> String {
+        match self {
+            Self::Host => String::from("host"),
+            Self::Target => String::from("target"),
+        }
+    }
 }
 
 #[derive(Debug)]
