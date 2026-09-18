@@ -27,7 +27,7 @@ impl Store {
     }
 
     fn entry_path(&self, category: &str, hash: u128) -> PathBuf {
-        self.path.join(format!("{}-{:x}", category, hash))
+        self.path.join(store_entry_name(category, hash))
     }
 
     pub fn prune_store(&self, exclude: HashSet<(&str, u128)>) -> Result<(), FileSystemError> {
@@ -36,7 +36,7 @@ impl Store {
         for entry in dir_entries(&self.path)? {
             if exclude
                 .iter()
-                .any(|(cat, hash)| entry.file_name().eq(format!("{}-{:x}", cat, hash).as_str()))
+                .any(|(cat, hash)| entry.file_name().eq(store_entry_name(cat, *hash).as_str()))
             {
                 continue;
             }
@@ -111,4 +111,8 @@ impl StoreEntry {
     pub fn path(&self) -> PathBuf {
         self.store.entry_path(&self.category, self.hash)
     }
+}
+
+fn store_entry_name(category: &str, hash: u128) -> String {
+    format!("{}-{:x}", category, hash)
 }
