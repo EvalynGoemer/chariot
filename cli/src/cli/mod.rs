@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    fs::{create_dir_all, exists, read_to_string, write},
-    io::{self, stdout},
+    fs::{OpenOptions, create_dir_all, write},
+    io::{self, Read, Seek, SeekFrom, Write, stdout},
     path::{Path, PathBuf},
     sync::Arc,
     thread::available_parallelism,
@@ -21,7 +21,10 @@ use chariot_core::{
     xbps::package_install,
 };
 use chariot_rootfs::{CachedPkgSet, DEFAULT_MANIFESTS_URL, ManifestFetchSpec, RootFS};
-use chariot_util::fs::make_path;
+use chariot_util::{
+    fs::make_path,
+    lock::{FileLockKind, open_file_locked},
+};
 use clap::{Args, CommandFactory, Parser, Subcommand, value_parser};
 use clap_complete::{Shell, generate};
 use dialoguer::Confirm;
@@ -33,25 +36,25 @@ use crate::{cli::support::setup_lua_lsp, config::parse_cli_config, util::Progres
 
 mod support;
 
-const SUBDIR_STORE: &str = "store";
-const SUBDIR_BUILD_CACHE: &str = "builddirs";
-const SUBDIR_WORKDIRS: &str = "workdirs";
-const FILENAME_STATE: &str = "state.toml";
+const DEFAULT_CACHE_PATH: &str = ".chariot-cache";
+const DEFAULT_ROOTFS_PATH: &str = ".chariot-rootfs";
+
+const CACHE_SUBDIR_STORE: &str = "store";
+const CACHE_SUBDIR_BUILD_CACHE: &str = "builddirs";
+const CACHE_SUBDIR_WORKDIRS: &str = "workdirs";
+const CACHE_FILENAME_STATE: &str = "state.json";
+const CACHE_FILENAME_GITIGNORE: &str = ".gitignore";
+
+const ARG_CACHE_HELP: &str = "path to chariot cache";
+const ARG_CACHE_ENV: &str = "CHARIOT_CACHE_PATH";
+const ARG_BASECONFIG_HELP: &str = "path to chariot base config";
+const ARG_BASECONFIG_ENV: &str = "CHARIOT_BASE_CONFIG_PATH";
 
 #[derive(Parser)]
 #[command(version, next_line_help = true)]
 struct ChariotOptions {
     #[arg(long, help = "path to local config", default_value = ".chariot.toml")]
     local_config: String,
-
-    #[arg(long, help = "path to base config", default_value = DEFAULT_BASE_CONFIG_PATH)]
-    config: String,
-
-    #[arg(long, help = "path to chariot cache", default_value = ".chariot-cache")]
-    cache: String,
-
-    #[arg(long, help = "path to chariot rootfs", default_value = ".chariot-rootfs")]
-    rootfs: String,
 
     #[command(subcommand)]
     command: MainCommand,
@@ -64,6 +67,9 @@ enum MainCommand {
         #[command(subcommand)]
         command: SupportCommand,
     },
+
+    #[command(about = "store commands")]
+    Store(StoreOptions),
 
     #[command(about = "install package")]
     Install(InstallOptions),
@@ -82,7 +88,37 @@ enum SupportCommand {
 }
 
 #[derive(Args)]
+struct StoreOptions {
+    #[arg(long, env = ARG_CACHE_ENV, help = ARG_CACHE_HELP,  default_value = DEFAULT_CACHE_PATH)]
+    cache: PathBuf,
+
+    #[arg(long, env = ARG_BASECONFIG_ENV, help = ARG_BASECONFIG_HELP,  default_value = DEFAULT_BASE_CONFIG_PATH)]
+    base_config: PathBuf,
+
+    #[command(subcommand)]
+    command: StoreCommand,
+}
+
+#[derive(Subcommand)]
+enum StoreCommand {
+    #[command(about = "evaluate configuration for all known profiles and prunes dangling store entries")]
+    Prune,
+
+    #[command(about = "deletes all store entries")]
+    Purge,
+}
+
+#[derive(Args)]
 struct InstallOptions {
+    #[arg(long, env = ARG_CACHE_ENV, help = ARG_CACHE_HELP, default_value = DEFAULT_CACHE_PATH)]
+    cache: PathBuf,
+
+    #[arg(long, help = "path to chariot rootfs", default_value = DEFAULT_ROOTFS_PATH)]
+    rootfs: PathBuf,
+
+    #[arg(long, env = ARG_BASECONFIG_ENV, help = ARG_BASECONFIG_HELP, default_value = DEFAULT_BASE_CONFIG_PATH)]
+    base_config: PathBuf,
+
     #[arg(long, env = "CHARIOT_ARCH", help = "target architecture")]
     arch: String,
 
@@ -111,11 +147,39 @@ struct InputState {
 #[derive(Serialize, Deserialize, Default)]
 struct State {
     known_input_states: Vec<InputState>,
+    cached_hashes: HashMap<usize, HashSet<(String, u128)>>,
 }
 
 fn parse_kv(str: &str) -> Result<(String, String), String> {
     let pos = str.find('=').ok_or_else(|| format!("invalid KEY=VALUE: no `=` found in `{}`", str))?;
     Ok((str[..pos].to_string(), str[pos + 1..].to_string()))
+}
+
+fn with_state<T>(state_path: &Path, f: impl FnOnce(&mut State) -> Result<T>) -> Result<T> {
+    let mut state_file = open_file_locked(
+        state_path,
+        OpenOptions::new().create(true).write(true).read(true),
+        FileLockKind::Exclusive,
+    )
+    .context("Failed to open state file")?;
+
+    let mut state_data = String::new();
+    state_file.read_to_string(&mut state_data).context("Failed to read state file")?;
+
+    let mut state = if state_data.is_empty() {
+        State::default()
+    } else {
+        serde_json::from_str::<State>(&state_data).context("Failed to parse state file")?
+    };
+
+    let result = f(&mut state)?;
+
+    let out = serde_json::to_vec(&state).context("Failed to serialize state file")?;
+    state_file.seek(SeekFrom::Start(0)).context("Failed to seek state file")?;
+    state_file.write_all(&out).context("Failed to write state file")?;
+    state_file.set_len(out.len() as u64).context("Failed to truncate state file")?;
+
+    Ok(result)
 }
 
 pub fn run_cli() -> Result<()> {
@@ -125,6 +189,59 @@ pub fn run_cli() -> Result<()> {
 
     let install_opts = match opts.command {
         MainCommand::Install(install_opts) => install_opts,
+        MainCommand::Store(StoreOptions {
+            cache: cache_path,
+            base_config: base_config_path,
+            command: store_command,
+        }) => {
+            let store = Store::get(cache_path.join(CACHE_SUBDIR_STORE)).context("Failed to get store")?;
+
+            match store_command {
+                StoreCommand::Prune => {
+                    let base_config = read_base_config(&base_config_path).context("Failed to read base config")?;
+                    let target_prefix = base_config.target_prefix.unwrap_or(String::from(DEFAULT_TARGET_PREFIX));
+
+                    with_state(&cache_path.join(CACHE_FILENAME_STATE), |state| {
+                        for (idx, input_state) in state.known_input_states.iter().enumerate() {
+                            let global_environment = Arc::new(GlobalEnvironment {
+                                global_environment_variables: BTreeMap::new(),
+                                rootfs_manifest_hash: base_config.rootfs.hash.clone(),
+                                target_prefix: target_prefix.clone(),
+                                target_arch: input_state.arch.clone(),
+                            });
+
+                            let lua_config_path = base_config.lua_root.clone().unwrap_or(PathBuf::from(DEFAULT_LUA_CONFIG_PATH));
+                            let config = eval_lua_config(&lua_config_path, global_environment, input_state.options.clone())
+                                .context("Failed to evaluate lua config")?;
+
+                            state.cached_hashes.insert(
+                                idx,
+                                collect_all_hashes(&config)
+                                    .into_iter()
+                                    .map(|(cat, hash)| (cat.to_string(), hash))
+                                    .collect(),
+                            );
+                        }
+
+                        store.prune_store(HashSet::from_iter(
+                            state
+                                .cached_hashes
+                                .iter()
+                                .map(|(_, hashes)| hashes.into_iter())
+                                .flatten()
+                                .map(|(cat, hash)| (cat.as_str(), *hash)),
+                        ))?;
+
+                        Ok(())
+                    })?;
+                }
+                StoreCommand::Purge => {
+                    store.prune_store(HashSet::new()).context("Failed to purge store")?;
+                }
+            }
+
+            return Ok(());
+        }
         MainCommand::Support {
             command: SupportCommand::SetupLSP,
         } => return setup_lua_lsp(),
@@ -138,52 +255,70 @@ pub fn run_cli() -> Result<()> {
 
     let options = HashMap::from_iter(install_opts.options);
 
-    let cache_path = PathBuf::from(opts.cache);
+    let cache_path = PathBuf::from(install_opts.cache);
     make_path(&cache_path).context("Failed to create cache directory")?;
 
-    let state_path = cache_path.join(FILENAME_STATE);
-    let mut state = if exists(&state_path)? {
-        let state_data = read_to_string(&state_path).context("Failed to read state file")?;
-        toml::from_str::<State>(&state_data).context("Failed to parse state file")?
-    } else {
-        State::default()
-    };
+    write(cache_path.join(CACHE_FILENAME_GITIGNORE), "# Generated by Chariot\n*").context("Failed to write gitignore")?;
 
-    let input_permutation = InputState {
-        arch: install_opts.arch.clone(),
-        options: options.clone(),
-    };
+    let (base_config, config, cached_hashes) = with_state(&cache_path.join(CACHE_FILENAME_STATE), |state| {
+        let input_state = InputState {
+            arch: install_opts.arch.clone(),
+            options: options.clone(),
+        };
 
-    if !state.known_input_states.contains(&input_permutation) {
-        let ok = Confirm::new()
-            .default(true)
-            .with_prompt("Detected a new architecture, option (key or value), or permutation of these. Proceed?")
-            .interact()?;
+        let input_state_index = match state.known_input_states.iter().position(|state| state == &input_state) {
+            Some(index) => index,
+            None => {
+                let ok = Confirm::new()
+                    .default(true)
+                    .with_prompt("Detected a new profile (profile describes a specific permutation of architecture and options). Proceed?")
+                    .interact()?;
 
-        if !ok {
-            bail!("Canceled by user");
-        }
+                if !ok {
+                    bail!("Canceled by user");
+                }
 
-        state.known_input_states.push(input_permutation);
+                let len = state.known_input_states.len();
+                state.known_input_states.push(input_state);
+                len
+            }
+        };
 
-        let state_data = toml::to_string(&state).context("Failed to serialize state file")?;
-        write(&state_path, state_data).context("Failed to write state file")?;
-    }
+        let base_config = read_base_config(&install_opts.base_config).context("Failed to get base config")?;
+        let target_prefix = base_config.target_prefix.clone().unwrap_or(String::from(DEFAULT_TARGET_PREFIX));
 
-    let base_config = read_base_config(&opts.config).context("Failed to get base config")?;
-    let target_prefix = base_config.target_prefix.unwrap_or(String::from(DEFAULT_TARGET_PREFIX));
+        let global_environment = Arc::new(GlobalEnvironment {
+            global_environment_variables: BTreeMap::new(),
+            rootfs_manifest_hash: base_config.rootfs.hash.clone(),
+            target_prefix: target_prefix.clone(),
+            target_arch: install_opts.arch,
+        });
 
-    let global_environment = Arc::new(GlobalEnvironment {
-        global_environment_variables: BTreeMap::new(),
-        rootfs_manifest_hash: base_config.rootfs.hash.clone(),
-        target_prefix: target_prefix.clone(),
-        target_arch: install_opts.arch,
-    });
+        let lua_config_path = base_config.lua_root.clone().unwrap_or(PathBuf::from(DEFAULT_LUA_CONFIG_PATH));
+        let config = eval_lua_config(&lua_config_path, global_environment, options).context("Failed to evaluate lua config")?;
 
-    let lua_config_path = base_config.lua_root.unwrap_or(PathBuf::from(DEFAULT_LUA_CONFIG_PATH));
-    let config = eval_lua_config(&lua_config_path, global_environment, options).context("Failed to evaluate lua config")?;
+        state.cached_hashes.insert(
+            input_state_index,
+            collect_all_hashes(&config)
+                .into_iter()
+                .map(|(cat, hash)| (cat.to_string(), hash))
+                .collect(),
+        );
 
-    let rootfs = Arc::new(match RootFS::get(&opts.rootfs).context("Failed to get rootfs")? {
+        Ok((
+            base_config,
+            config,
+            state
+                .cached_hashes
+                .clone()
+                .into_iter()
+                .map(|(_, hashes)| hashes.into_iter())
+                .flatten()
+                .collect::<Vec<_>>(),
+        ))
+    })?;
+
+    let rootfs = Arc::new(match RootFS::get(&install_opts.rootfs).context("Failed to get rootfs")? {
         None => {
             info!("No rootfs found");
 
@@ -196,7 +331,7 @@ pub fn run_cli() -> Result<()> {
             let mut pb_writer = ProgressBarWriter::init(&pb);
 
             let rootfs = RootFS::init(
-                &opts.rootfs,
+                &install_opts.rootfs,
                 &ManifestFetchSpec {
                     url: base_config.rootfs.url.unwrap_or(String::from(DEFAULT_MANIFESTS_URL)),
                     version: base_config.rootfs.version,
@@ -238,9 +373,9 @@ pub fn run_cli() -> Result<()> {
         }
     });
 
-    let store = Arc::new(Store::get(cache_path.join(SUBDIR_STORE)).context("Failed to get store")?);
-    let workdir_parent = Arc::new(WorkDirectoryParent::get(cache_path.join(SUBDIR_WORKDIRS)).context("Failed to get workdirs")?);
-    let build_cache = Arc::new(BuildCache::get(cache_path.join(SUBDIR_BUILD_CACHE)).context("Failed to get build cache")?);
+    let store = Arc::new(Store::get(cache_path.join(CACHE_SUBDIR_STORE)).context("Failed to get store")?);
+    let workdir_parent = Arc::new(WorkDirectoryParent::get(cache_path.join(CACHE_SUBDIR_WORKDIRS)).context("Failed to get workdirs")?);
+    let build_cache = Arc::new(BuildCache::get(cache_path.join(CACHE_SUBDIR_BUILD_CACHE)).context("Failed to get build cache")?);
 
     let mut binary_to_pkgset: HashMap<&str, Option<Arc<CachedPkgSet>>> = HashMap::new();
     for binary in ["bsdtar", "git", "patch", "sha256sum", "wget"] {
@@ -329,31 +464,8 @@ pub fn run_cli() -> Result<()> {
         )?;
     }
 
-    prune_store(&store, state, base_config.rootfs.hash, target_prefix, &lua_config_path)?;
+    store.prune_store(HashSet::from_iter(cached_hashes.iter().map(|(cat, hash)| (cat.as_str(), *hash))))?;
     ctx.build_cache.prune(ctx.build_cache_enabled)?;
-
-    Ok(())
-}
-
-fn prune_store(store: &Arc<Store>, state: State, rootfs_manifest_hash: String, target_prefix: String, config_path: impl AsRef<Path>) -> Result<()> {
-    let mut all_hashes = HashSet::new();
-    for input_state in state.known_input_states {
-        let config = eval_lua_config(
-            &config_path,
-            Arc::new(GlobalEnvironment {
-                global_environment_variables: BTreeMap::new(),
-                rootfs_manifest_hash: rootfs_manifest_hash.clone(),
-                target_arch: input_state.arch,
-                target_prefix: target_prefix.clone(),
-            }),
-            input_state.options,
-        )
-        .context("Failed to evaluate config")?;
-        let hashes = collect_all_hashes(&config);
-        all_hashes.extend(hashes.iter());
-    }
-
-    store.prune_store(all_hashes).context("Failed to prune store")?;
 
     Ok(())
 }
