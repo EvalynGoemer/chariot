@@ -53,6 +53,9 @@ pub enum FileSystemError {
     #[error("Failed to read file `{}`", path.display())]
     ReadFile { path: PathBuf, source: io::Error },
 
+    #[error("Failed to read link `{}`", path.display())]
+    ReadLink { path: PathBuf, source: io::Error },
+
     #[error("Failed to seek file `{}`", path.display())]
     SeekFile { path: PathBuf, source: io::Error },
 

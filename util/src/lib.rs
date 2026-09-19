@@ -1,6 +1,7 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub mod fs;
+pub mod hash;
 pub mod lock;
 
 pub fn current_time() -> Duration {
