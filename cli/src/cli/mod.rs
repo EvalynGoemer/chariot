@@ -16,6 +16,8 @@ use chariot_core::{
     collect_all_hashes,
     config::{GlobalEnvironment, package::PackagePlatform},
     dependencies::resolve_repos_for_pkg,
+    ledger::Ledger,
+    resolve_effective_hashes,
     store::Store,
     workdir::WorkDirectoryParent,
     xbps::package_install,
@@ -42,6 +44,7 @@ const DEFAULT_ROOTFS_PATH: &str = ".chariot-rootfs";
 const CACHE_SUBDIR_STORE: &str = "store";
 const CACHE_SUBDIR_BUILD_CACHE: &str = "builddirs";
 const CACHE_SUBDIR_WORKDIRS: &str = "workdirs";
+const CACHE_FILENAME_LEDGER: &str = "ledger.db";
 const CACHE_FILENAME_STATE: &str = "state.json";
 const CACHE_FILENAME_GITIGNORE: &str = ".gitignore";
 
@@ -195,6 +198,7 @@ pub fn run_cli() -> Result<()> {
             command: store_command,
         }) => {
             let store = Store::get(cache_path.join(CACHE_SUBDIR_STORE)).context("Failed to get store")?;
+            let ledger = Ledger::get(cache_path.join(CACHE_FILENAME_LEDGER)).context("Failed to get ledger")?;
 
             match store_command {
                 StoreCommand::Prune => {
@@ -223,20 +227,23 @@ pub fn run_cli() -> Result<()> {
                             );
                         }
 
-                        store.prune_store(HashSet::from_iter(
-                            state
-                                .cached_hashes
-                                .iter()
-                                .map(|(_, hashes)| hashes.into_iter())
-                                .flatten()
-                                .map(|(cat, hash)| (cat.as_str(), *hash)),
-                        ))?;
+                        let live_recipe_hashes = state
+                            .cached_hashes
+                            .iter()
+                            .map(|(_, hashes)| hashes.into_iter())
+                            .flatten()
+                            .map(|(cat, hash)| (cat.as_str(), *hash))
+                            .collect::<HashSet<_>>();
+
+                        store.prune_store(resolve_effective_hashes(&ledger, live_recipe_hashes.iter().copied())?)?;
+                        ledger.prune(live_recipe_hashes)?;
 
                         Ok(())
                     })?;
                 }
                 StoreCommand::Purge => {
                     store.prune_store(HashSet::new()).context("Failed to purge store")?;
+                    ledger.prune(HashSet::new()).context("Failed to purge ledger")?;
                 }
             }
 
@@ -374,6 +381,7 @@ pub fn run_cli() -> Result<()> {
     });
 
     let store = Arc::new(Store::get(cache_path.join(CACHE_SUBDIR_STORE)).context("Failed to get store")?);
+    let ledger = Arc::new(Ledger::get(cache_path.join(CACHE_FILENAME_LEDGER)).context("Failed to get ledger")?);
     let workdir_parent = Arc::new(WorkDirectoryParent::get(cache_path.join(CACHE_SUBDIR_WORKDIRS)).context("Failed to get workdirs")?);
     let build_cache = Arc::new(BuildCache::get(cache_path.join(CACHE_SUBDIR_BUILD_CACHE)).context("Failed to get build cache")?);
 
@@ -416,6 +424,7 @@ pub fn run_cli() -> Result<()> {
         sha256sum_pkgset: binary_to_pkgset.remove("sha256sum").unwrap(),
         wget_pkgset: binary_to_pkgset.remove("wget").unwrap(),
         store: store.clone(),
+        ledger,
         workdir_parent,
         build_cache,
         rootfs,
@@ -464,7 +473,10 @@ pub fn run_cli() -> Result<()> {
         )?;
     }
 
-    store.prune_store(HashSet::from_iter(cached_hashes.iter().map(|(cat, hash)| (cat.as_str(), *hash))))?;
+    let live_recipe_hashes = cached_hashes.iter().map(|(cat, hash)| (cat.as_str(), *hash)).collect::<HashSet<_>>();
+
+    store.prune_store(resolve_effective_hashes(&ctx.ledger, live_recipe_hashes.iter().copied())?)?;
+    ctx.ledger.prune(live_recipe_hashes)?;
     ctx.build_cache.prune(ctx.build_cache_enabled)?;
 
     Ok(())

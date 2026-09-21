@@ -5,6 +5,7 @@ use chariot_rootfs::{CachedPkgSet, RootFS};
 use crate::{
     buildcache::BuildCache,
     config::{Config, package::PackagePlatform},
+    ledger::Ledger,
     store::Store,
     workdir::WorkDirectoryParent,
 };
@@ -13,6 +14,7 @@ pub mod buildcache;
 pub mod config;
 pub mod dependencies;
 mod execenv;
+pub mod ledger;
 pub mod package;
 pub mod source;
 pub mod store;
@@ -30,6 +32,7 @@ pub struct CoreContext {
     pub parallelism: usize,
     pub rootfs: Arc<RootFS>,
     pub store: Arc<Store>,
+    pub ledger: Arc<Ledger>,
     pub build_cache: Arc<BuildCache>,
     pub workdir_parent: Arc<WorkDirectoryParent>,
     pub root_pkgset: Option<Arc<CachedPkgSet>>,
@@ -47,10 +50,32 @@ pub fn collect_all_hashes(config: &Config) -> HashSet<(&'static str, u128)> {
         hashes.insert(("pkg", pkg.get_package_hash()));
     }
     for src in &config.sources {
-        let (base_hash, patch_hash, prepare_hash) = src.get_hashes();
+        let base_hash = src.get_base_hash();
+        let patch_hash = src.get_patch_hash(base_hash);
+        let prepare_hash = src.get_prepare_hash(src.get_prepare_base_hash(patch_hash));
         hashes.insert(("source.base", base_hash));
         hashes.insert(("source.patch", patch_hash));
         hashes.insert(("source.prepare", prepare_hash));
     }
     hashes
+}
+
+pub fn resolve_effective_hashes<'a>(
+    ledger: &Ledger,
+    unresolved_hashes: impl Iterator<Item = (&'a str, u128)>,
+) -> Result<HashSet<(&'a str, u128)>, rusqlite::Error> {
+    let mut resolved_hashes = HashSet::new();
+    for (category, hash) in unresolved_hashes {
+        match category {
+            "install" | "pkg" | "source.prepare" => {
+                if let Some(effective_hash) = ledger.lookup(category, hash)? {
+                    resolved_hashes.insert((category, effective_hash));
+                }
+            }
+            _ => {
+                resolved_hashes.insert((category, hash));
+            }
+        }
+    }
+    Ok(resolved_hashes)
 }

@@ -9,12 +9,6 @@ use xxhash_rust::xxh3::Xxh3;
 use crate::config::{CONFIG_VERSION, Dependencies, GlobalEnvironment, script::Script};
 
 #[derive(Debug, Hash)]
-pub enum SourceBase {
-    Archive(Archive),
-    Git(GitSource),
-}
-
-#[derive(Debug, Hash)]
 pub struct Archive {
     pub url: String,
     pub checksum: String,
@@ -40,6 +34,12 @@ pub struct GitSource {
     pub revision: String,
 }
 
+#[derive(Debug, Hash)]
+pub enum SourceBase {
+    Archive(Archive),
+    Git(GitSource),
+}
+
 #[derive(Debug)]
 pub struct SourcePrepare {
     pub global_env: Arc<GlobalEnvironment>,
@@ -56,41 +56,47 @@ pub struct Source {
 }
 
 impl Source {
-    pub fn get_hashes(&self) -> (u128, u128, u128) {
-        let base_hash = {
-            let mut hasher = Xxh3::new();
-            CONFIG_VERSION.hash(&mut hasher);
-            self.base.hash(&mut hasher);
-            hasher.digest128()
-        };
+    pub fn get_base_hash(&self) -> u128 {
+        let mut hasher = Xxh3::new();
+        CONFIG_VERSION.hash(&mut hasher);
+        self.base.hash(&mut hasher);
+        hasher.digest128()
+    }
 
-        let patch_hash = {
-            let mut hasher = Xxh3::new();
-            base_hash.hash(&mut hasher);
-            self.patches.hash(&mut hasher);
-            hasher.digest128()
-        };
+    pub fn get_patch_hash(&self, base_hash: u128) -> u128 {
+        let mut hasher = Xxh3::new();
+        base_hash.hash(&mut hasher);
+        self.patches.hash(&mut hasher);
+        hasher.digest128()
+    }
 
-        let prepare_hash = {
-            let mut hasher = Xxh3::new();
-            patch_hash.hash(&mut hasher);
-            if let Some(prepare) = &self.prepare {
-                prepare.global_env.rootfs_manifest_hash.hash(&mut hasher);
-                prepare.global_env.global_environment_variables.hash(&mut hasher);
-                prepare.environment_variables.hash(&mut hasher);
-                prepare.dependencies.hash(&mut hasher);
-                prepare.script.hash(&mut hasher);
-            }
-            hasher.digest128()
-        };
+    pub fn get_prepare_base_hash(&self, patch_hash: u128) -> u128 {
+        let mut hasher = Xxh3::new();
+        patch_hash.hash(&mut hasher);
+        if let Some(prepare) = &self.prepare {
+            prepare.global_env.rootfs_manifest_hash.hash(&mut hasher);
+            prepare.global_env.global_environment_variables.hash(&mut hasher);
+            prepare.environment_variables.hash(&mut hasher);
+            prepare.script.hash(&mut hasher);
+            prepare.dependencies.native.hash(&mut hasher);
+        }
+        hasher.digest128()
+    }
 
-        (base_hash, patch_hash, prepare_hash)
+    pub fn get_prepare_hash(&self, prepare_base_hash: u128) -> u128 {
+        let mut hasher = Xxh3::new();
+        prepare_base_hash.hash(&mut hasher);
+        if let Some(prepare) = &self.prepare {
+            prepare.dependencies.sources.hash(&mut hasher);
+            prepare.dependencies.tools.hash(&mut hasher);
+            prepare.dependencies.packages.hash(&mut hasher);
+        }
+        hasher.digest128()
     }
 }
 
 impl Hash for Source {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        let (_, _, prepare_hash) = self.get_hashes();
-        state.write_u128(prepare_hash);
+        state.write_u128(self.get_prepare_hash(self.get_prepare_base_hash(self.get_patch_hash(self.get_base_hash()))));
     }
 }

@@ -56,7 +56,8 @@ impl Package {
         }
     }
 
-    pub fn get_content_hash(&self) -> u128 {
+    /// Content hash, not including dependencies.
+    pub fn get_content_base_hash(&self) -> u128 {
         let mut hasher = Xxh3::new();
         CONFIG_VERSION.hash(&mut hasher);
         self.global_env.rootfs_manifest_hash.hash(&mut hasher);
@@ -64,21 +65,39 @@ impl Package {
         self.get_arch().hash(&mut hasher);
         self.get_prefix().hash(&mut hasher);
         self.environment_variables.hash(&mut hasher);
-        self.dependencies.hash(&mut hasher);
+        self.dependencies.native.hash(&mut hasher);
         self.configure.hash(&mut hasher);
         self.build.hash(&mut hasher);
         self.install.hash(&mut hasher);
         hasher.digest128()
     }
 
-    pub fn get_package_hash(&self) -> u128 {
+    /// Full content hash including dependency package hashes.
+    pub fn get_content_hash(&self) -> u128 {
         let mut hasher = Xxh3::new();
-        self.get_content_hash().hash(&mut hasher);
-        self.platform.hash(&mut hasher);
+        self.get_content_base_hash().hash(&mut hasher);
+        self.dependencies.sources.hash(&mut hasher);
+        self.dependencies.tools.hash(&mut hasher);
+        self.dependencies.packages.hash(&mut hasher);
+        hasher.digest128()
+    }
+
+    /// Hashes all of the package metadata, not the content.
+    pub fn get_package_meta_hash(&self) -> u128 {
+        let mut hasher = Xxh3::new();
+        self.get_arch().hash(&mut hasher);
         self.name.hash(&mut hasher);
         self.version.hash(&mut hasher);
         self.revision.hash(&mut hasher);
         self.runtime_dependencies.hash(&mut hasher);
+        hasher.digest128()
+    }
+
+    /// Full package hash including content and meta.
+    pub fn get_package_hash(&self) -> u128 {
+        let mut hasher = Xxh3::new();
+        self.get_content_hash().hash(&mut hasher);
+        self.get_package_meta_hash().hash(&mut hasher);
         hasher.digest128()
     }
 }

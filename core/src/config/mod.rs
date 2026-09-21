@@ -1,6 +1,5 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    hash::Hash,
     sync::Arc,
 };
 
@@ -12,9 +11,9 @@ pub mod source;
 
 /// Describes the config version. If the config format changes
 /// in a backwards incompatible way, this version should be bumped.
-const CONFIG_VERSION: u64 = 2;
+const CONFIG_VERSION: u64 = 3;
 
-#[derive(Debug, Default, Hash)]
+#[derive(Debug, Default)]
 pub struct Dependencies {
     pub native: BTreeSet<String>,
     pub sources: BTreeMap<String, Arc<Source>>,

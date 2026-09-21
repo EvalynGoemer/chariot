@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    hash::{Hash, Hasher},
     io::Write,
     path::{Path, PathBuf},
     sync::Arc,
@@ -7,6 +8,8 @@ use std::{
 
 use chariot_rootfs::{CachedPkgSet, RootFSOverlay};
 use chariot_runtime::{Mount, MountKind, Overlay, RuntimeError};
+use chariot_util::{fs::FileSystemError, hash::hash_directory};
+use xxhash_rust::xxh3::Xxh3;
 
 use crate::{CoreContext, store::StoreEntry, workdir::WorkDirectory};
 
@@ -19,6 +22,31 @@ pub struct ExecEnv<'a> {
 }
 
 impl<'a> ExecEnv<'a> {
+    pub fn compute_deps_hash(&self) -> Result<u128, FileSystemError> {
+        let mut hasher = Xxh3::new();
+
+        let mut names = self.sources.keys().collect::<Vec<_>>();
+        names.sort();
+        for name in names {
+            name.hash(&mut hasher);
+            for entry in &self.sources[name] {
+                hash_directory(entry.path(), &mut hasher)?;
+            }
+        }
+
+        hash_directory(self.sysroot.path(), &mut hasher)?;
+
+        match &self.tool_overlay {
+            Some(tool_overlay) => {
+                hasher.write_u8(1);
+                hash_directory(tool_overlay.path(), &mut hasher)?;
+            }
+            None => hasher.write_u8(0),
+        }
+
+        Ok(hasher.digest128())
+    }
+
     pub fn exec(
         &self,
         cwd: impl AsRef<Path>,

@@ -1,8 +1,9 @@
-use std::{io::Write, path::PathBuf};
+use std::{hash::Hash, io::Write, path::PathBuf};
 
 use chariot_runtime::{Mount, MountKind, RuntimeError};
-use chariot_util::fs::FileSystemError;
+use chariot_util::{fs::FileSystemError, hash::hash_directory};
 use thiserror::Error;
+use xxhash_rust::xxh3::Xxh3;
 
 use crate::{
     CoreContext,
@@ -22,6 +23,9 @@ pub enum ProcessPackageError {
 
     #[error(transparent)]
     FileSystem(#[from] FileSystemError),
+
+    #[error(transparent)]
+    Database(#[from] rusqlite::Error),
 
     #[error(transparent)]
     Runtime(#[from] RuntimeError),
@@ -44,11 +48,26 @@ pub enum ProcessPackageError {
 
 pub fn process_package(ctx: &CoreContext, logger: &mut dyn Write, package: &Package) -> Result<StoreEntry, ProcessPackageError> {
     let pkg_hash = package.get_package_hash();
-    if let Some(store_entry) = StoreEntry::get(&ctx.store, "pkg", pkg_hash)? {
+
+    if let Some(effective_hash) = ctx.ledger.lookup("pkg", pkg_hash)?
+        && let Some(store_entry) = StoreEntry::get(&ctx.store, "pkg", effective_hash)?
+    {
         return Ok(store_entry);
     }
 
     let install_store_entry = get_package_install(ctx, logger, package)?;
+
+    let effective_hash = {
+        let mut hasher = Xxh3::new();
+        package.get_package_meta_hash().hash(&mut hasher);
+        hash_directory(install_store_entry.path(), &mut hasher)?;
+        hasher.digest128()
+    };
+
+    if let Some(store_entry) = StoreEntry::get(&ctx.store, "pkg", effective_hash)? {
+        ctx.ledger.record("pkg", pkg_hash, effective_hash)?;
+        return Ok(store_entry);
+    }
 
     let runtime_deps = package
         .runtime_dependencies
@@ -69,17 +88,35 @@ pub fn process_package(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
         logger,
     )?;
 
-    Ok(StoreEntry::from_workdir(&ctx.store, workdir, "pkg", pkg_hash)?)
+    let store_entry = StoreEntry::from_workdir(&ctx.store, workdir, "pkg", effective_hash)?;
+    ctx.ledger.record("pkg", pkg_hash, effective_hash)?;
+
+    Ok(store_entry)
 }
 
 fn get_package_install(ctx: &CoreContext, logger: &mut dyn Write, package: &Package) -> Result<StoreEntry, ProcessPackageError> {
     let pkg_content_hash = package.get_content_hash();
 
-    if let Some(store_entry) = StoreEntry::get(&ctx.store, "install", pkg_content_hash)? {
+    if let Some(effective_hash) = ctx.ledger.lookup("install", pkg_content_hash)?
+        && let Some(store_entry) = StoreEntry::get(&ctx.store, "install", effective_hash)?
+    {
         return Ok(store_entry);
     }
 
     let exec_env = resolve_dependencies(ctx, logger, &package.dependencies).map_err(|err| Box::new(err))?;
+    let deps_input_hash = exec_env.compute_deps_hash()?;
+
+    let effective_hash = {
+        let mut hasher = Xxh3::new();
+        package.get_content_base_hash().hash(&mut hasher);
+        deps_input_hash.hash(&mut hasher);
+        hasher.digest128()
+    };
+
+    if let Some(store_entry) = StoreEntry::get(&ctx.store, "install", effective_hash)? {
+        ctx.ledger.record("install", pkg_content_hash, effective_hash)?;
+        return Ok(store_entry);
+    }
 
     let mut _build_cachedir = None;
     let mut _build_workdir = None;
@@ -161,5 +198,8 @@ fn get_package_install(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
         return Err(ProcessPackageError::Install(exit_code));
     }
 
-    Ok(StoreEntry::from_workdir(&ctx.store, install_workdir, "install", pkg_content_hash)?)
+    let store_entry = StoreEntry::from_workdir(&ctx.store, install_workdir, "install", effective_hash)?;
+    ctx.ledger.record("install", pkg_content_hash, effective_hash)?;
+
+    Ok(store_entry)
 }

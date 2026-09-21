@@ -1,8 +1,9 @@
-use std::{collections::HashMap, io::Write, path::PathBuf};
+use std::{collections::HashMap, hash::Hash, io::Write, path::PathBuf};
 
 use chariot_runtime::{Mount, MountKind::OverlayFS, Overlay, OverlayUpperDirectory, RuntimeError};
 use chariot_util::fs::FileSystemError;
 use thiserror::Error;
+use xxhash_rust::xxh3::Xxh3;
 
 use crate::{
     CoreContext,
@@ -31,6 +32,9 @@ pub enum SourceFetchError {
     Runtime(#[from] RuntimeError),
 
     #[error(transparent)]
+    Database(#[from] rusqlite::Error),
+
+    #[error(transparent)]
     ResolveDependencies(#[from] Box<ResolveDependenciesError>), // TODO: box here is nasty
 
     #[error(transparent)]
@@ -48,8 +52,9 @@ pub enum SourceFetchError {
 
 pub fn fetch_source(ctx: &CoreContext, logger: &mut dyn Write, source: &Source) -> Result<Vec<StoreEntry>, SourceFetchError> {
     let mut store_entries = Vec::new();
-    let (base_hash, patch_hash, prepare_hash) = source.get_hashes();
+    // let (base_hash, patch_hash, prepare_hash) = source.get_hashes();
 
+    let base_hash = source.get_base_hash();
     let base_store_entry = match StoreEntry::get(&ctx.store, "source.base", base_hash)? {
         Some(store_entry) => store_entry,
         None => StoreEntry::from_workdir(
@@ -64,6 +69,7 @@ pub fn fetch_source(ctx: &CoreContext, logger: &mut dyn Write, source: &Source) 
     };
     store_entries.push(base_store_entry);
 
+    let patch_hash = source.get_patch_hash(base_hash);
     if source.patches.len() > 0 {
         let patched_store_entry = match StoreEntry::get(&ctx.store, "source.patch", patch_hash)? {
             Some(store_entry) => store_entry,
@@ -103,43 +109,67 @@ pub fn fetch_source(ctx: &CoreContext, logger: &mut dyn Write, source: &Source) 
     };
 
     if let Some(prepare) = &source.prepare {
-        let exec_env = resolve_dependencies(ctx, logger, &prepare.dependencies).map_err(|err| Box::new(err))?;
+        let prepare_hash_base = source.get_prepare_base_hash(patch_hash);
+        let prepare_hash = source.get_prepare_hash(prepare_hash_base);
 
-        let prepare_store_entry = match StoreEntry::get(&ctx.store, "source.prepare", prepare_hash)? {
+        let cached_entry = match ctx.ledger.lookup("source.prepare", prepare_hash)? {
+            Some(effective_hash) => StoreEntry::get(&ctx.store, "source.prepare", effective_hash)?,
+            None => None,
+        };
+
+        let prepare_store_entry = match cached_entry {
             Some(store_entry) => store_entry,
             None => {
-                let overlay_work_directory = WorkDirectory::create(&ctx.workdir_parent)?;
-                let work_directory = WorkDirectory::create(&ctx.workdir_parent)?;
+                let exec_env = resolve_dependencies(ctx, logger, &prepare.dependencies).map_err(|err| Box::new(err))?;
+                let deps_input_hash = exec_env.compute_deps_hash()?;
 
-                let exit_code = exec_env.exec(
-                    "/chariot/source",
-                    vec![&Mount {
-                        dest: PathBuf::from("/chariot/source"),
-                        kind: OverlayFS(Overlay {
-                            lower_directories: store_entries.iter().map(|entry| entry.path()).collect(),
-                            upper_directory: Some(OverlayUpperDirectory {
-                                upper_directory: work_directory.path(),
-                                work_directory: overlay_work_directory.path(),
-                            }),
-                        }),
-                    }],
-                    &prepare
-                        .global_env
-                        .global_environment_variables
-                        .iter()
-                        .chain(&prepare.environment_variables)
-                        .map(|(k, v)| (k.as_str(), v.as_str()))
-                        .chain([("SOURCE_DIR", "/chariot/source")])
-                        .collect(),
-                    logger,
-                    prepare.script.command(),
-                )?;
+                let effective_hash = {
+                    let mut hasher = Xxh3::new();
+                    prepare_hash_base.hash(&mut hasher);
+                    deps_input_hash.hash(&mut hasher);
+                    hasher.digest128()
+                };
 
-                if exit_code != 0 {
-                    return Err(SourceFetchError::Prepare);
-                }
+                let entry = match StoreEntry::get(&ctx.store, "source.prepare", effective_hash)? {
+                    Some(store_entry) => store_entry,
+                    None => {
+                        let overlay_work_directory = WorkDirectory::create(&ctx.workdir_parent)?;
+                        let work_directory = WorkDirectory::create(&ctx.workdir_parent)?;
 
-                StoreEntry::from_workdir(&ctx.store, work_directory, "source.prepare", prepare_hash)?
+                        let exit_code = exec_env.exec(
+                            "/chariot/source",
+                            vec![&Mount {
+                                dest: PathBuf::from("/chariot/source"),
+                                kind: OverlayFS(Overlay {
+                                    lower_directories: store_entries.iter().map(|entry| entry.path()).collect(),
+                                    upper_directory: Some(OverlayUpperDirectory {
+                                        upper_directory: work_directory.path(),
+                                        work_directory: overlay_work_directory.path(),
+                                    }),
+                                }),
+                            }],
+                            &prepare
+                                .global_env
+                                .global_environment_variables
+                                .iter()
+                                .chain(&prepare.environment_variables)
+                                .map(|(k, v)| (k.as_str(), v.as_str()))
+                                .chain([("SOURCE_DIR", "/chariot/source")])
+                                .collect(),
+                            logger,
+                            prepare.script.command(),
+                        )?;
+
+                        if exit_code != 0 {
+                            return Err(SourceFetchError::Prepare);
+                        }
+
+                        StoreEntry::from_workdir(&ctx.store, work_directory, "source.prepare", effective_hash)?
+                    }
+                };
+
+                ctx.ledger.record("source.prepare", prepare_hash, effective_hash)?;
+                entry
             }
         };
         store_entries.push(prepare_store_entry);
