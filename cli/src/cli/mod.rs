@@ -339,7 +339,14 @@ fn build_prepare(build_opts: CommonBuildOptions, local_config: &CliConfig) -> Re
             }
         };
 
-        let base_config = read_base_config(&build_opts.base_config).context("Failed to get base config")?;
+        let base_config_path = build_opts
+            .base_config
+            .canonicalize()
+            .context("Failed to canonicalize (find absolute path of) base config")?;
+
+        let config_dir = base_config_path.parent().context("Failed to resolve directory of base config")?;
+
+        let base_config = read_base_config(&base_config_path).context("Failed to get base config")?;
         let target_prefix = base_config.target_prefix.clone().unwrap_or(String::from(DEFAULT_TARGET_PREFIX));
 
         let global_environment = Arc::new(GlobalEnvironment {
@@ -349,7 +356,7 @@ fn build_prepare(build_opts: CommonBuildOptions, local_config: &CliConfig) -> Re
             target_arch: build_opts.arch,
         });
 
-        let lua_config_path = base_config.lua_root.clone().unwrap_or(PathBuf::from(DEFAULT_LUA_CONFIG_PATH));
+        let lua_config_path = config_dir.join(base_config.lua_root.clone().unwrap_or(PathBuf::from(DEFAULT_LUA_CONFIG_PATH)));
         let config = eval_lua_config(&lua_config_path, global_environment, options, local_sources_path).context("Failed to evaluate lua config")?;
 
         state.cached_hashes.insert(
