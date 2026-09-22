@@ -47,6 +47,19 @@ impl Ledger {
         Ok(())
     }
 
+    pub fn list(&self) -> Result<Vec<(String, u128, u128)>, rusqlite::Error> {
+        let mut stmt = self.0.prepare("SELECT category, hash, effective_hash FROM ledger ORDER BY category, hash")?;
+        let entries = stmt.query_map([], |row| {
+            Ok((
+                row.get::<usize, String>(0)?,
+                u128::from_be_bytes(row.get::<usize, [u8; 16]>(1)?),
+                u128::from_be_bytes(row.get::<usize, [u8; 16]>(2)?),
+            ))
+        })?;
+
+        entries.collect()
+    }
+
     pub fn prune(&self, exclude: HashSet<(&str, u128)>) -> Result<(), rusqlite::Error> {
         let tx = self.0.unchecked_transaction()?;
 

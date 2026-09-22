@@ -116,6 +116,21 @@ enum StoreCommand {
 }
 
 #[derive(Args)]
+struct LedgerOptions {
+    #[arg(long, env = ARG_CACHE_ENV, help = ARG_CACHE_HELP,  default_value = DEFAULT_CACHE_PATH)]
+    cache: PathBuf,
+
+    #[command(subcommand)]
+    command: LedgerCommand,
+}
+
+#[derive(Subcommand)]
+enum LedgerCommand {
+    #[command(about = "lists all entries in the ledger")]
+    List,
+}
+
+#[derive(Args)]
 struct InstallOptions {
     #[arg(long, env = ARG_CACHE_ENV, help = ARG_CACHE_HELP, default_value = DEFAULT_CACHE_PATH)]
     cache: PathBuf,
@@ -251,6 +266,38 @@ pub fn run_cli() -> Result<()> {
                 StoreCommand::Purge => {
                     store.prune_store(HashSet::new()).context("Failed to purge store")?;
                     ledger.prune(HashSet::new()).context("Failed to purge ledger")?;
+                }
+            }
+
+            return Ok(());
+        }
+        MainCommand::Ledger(LedgerOptions {
+            cache: cache_path,
+            command: ledger_command,
+        }) => {
+            let ledger = Ledger::get(cache_path.join(CACHE_FILENAME_LEDGER)).context("Failed to get ledger")?;
+
+            match ledger_command {
+                LedgerCommand::List => {
+                    let records = ledger.list().context("Failed to list ledger records")?;
+                    let max_category_length = records.iter().map(|(cat, ..)| cat.len()).max().unwrap_or(0).max(8);
+                    info!(
+                        "{:<cat_width$} {:<32} {:<32}",
+                        "category",
+                        "input_hash",
+                        "effective_hash",
+                        cat_width = max_category_length
+                    );
+                    info!("{}", "-".repeat(max_category_length + 66));
+                    for (category, hash, effective_hash) in records {
+                        info!(
+                            "{:<cat_width$} {:<32x} {:<32x}",
+                            category,
+                            hash,
+                            effective_hash,
+                            cat_width = max_category_length
+                        );
+                    }
                 }
             }
 
