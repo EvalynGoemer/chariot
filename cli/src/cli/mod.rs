@@ -95,9 +95,6 @@ enum MainCommand {
 
     #[command(about = "install package")]
     Install(InstallOptions),
-
-    #[command(about = "garbage collect")]
-    Gc(GarbageCollectionOptions),
 }
 
 #[derive(Args)]
@@ -111,11 +108,17 @@ struct CacheOptions {
 
 #[derive(Subcommand)]
 enum CacheCommand {
+    #[command(about = "lists all entries in the ledger")]
+    ListLedger,
+
     #[command(about = "deletes all store and ledger entries")]
     Purge,
 
-    #[command(about = "lists all entries in the ledger")]
-    ListLedger,
+    #[command(about = "garbage collect")]
+    Gc {
+        #[arg(long, env = ARG_BASECONFIG_ENV, help = ARG_BASECONFIG_HELP,  default_value = DEFAULT_BASE_CONFIG_PATH)]
+        base_config: PathBuf,
+    },
 }
 
 #[derive(Args)]
@@ -246,15 +249,6 @@ struct InstallOptions {
 
     #[arg(required = true, help = "package install destination")]
     dest: String,
-}
-
-#[derive(Args)]
-struct GarbageCollectionOptions {
-    #[arg(long, env = ARG_CACHE_ENV, help = ARG_CACHE_HELP,  default_value = DEFAULT_CACHE_PATH)]
-    cache: PathBuf,
-
-    #[arg(long, env = ARG_BASECONFIG_ENV, help = ARG_BASECONFIG_HELP,  default_value = DEFAULT_BASE_CONFIG_PATH)]
-    base_config: PathBuf,
 }
 
 #[derive(Serialize, Deserialize, PartialEq)]
@@ -721,59 +715,6 @@ pub fn run_cli() -> Result<()> {
                 script.command(),
             )?;
         }
-        MainCommand::Gc(GarbageCollectionOptions {
-            cache: cache_path,
-            base_config: base_config_path,
-        }) => {
-            let store = Store::get(cache_path.join(CACHE_SUBDIR_STORE)).context("Failed to get store")?;
-            let ledger = Ledger::get(cache_path.join(CACHE_FILENAME_LEDGER)).context("Failed to get ledger")?;
-
-            let local_sources_path = cache_path.join(CACHE_SUBDIR_LOCAL_SOURCES);
-            force_rm(&local_sources_path)?;
-
-            let base_config_path = base_config_path
-                .canonicalize()
-                .context("Failed to canonicalize (find absolute path of) base config")?;
-
-            let base_config = read_base_config(&base_config_path).context("Failed to read base config")?;
-            let target_prefix = base_config.target_prefix.unwrap_or(String::from(DEFAULT_TARGET_PREFIX));
-
-            with_state(&cache_path.join(CACHE_FILENAME_STATE), |state| {
-                for (idx, input_state) in state.known_input_states.iter().enumerate() {
-                    let global_environment = Arc::new(GlobalEnvironment {
-                        global_environment_variables: BTreeMap::new(),
-                        rootfs_manifest_hash: base_config.rootfs.hash.clone(),
-                        target_prefix: target_prefix.clone(),
-                        target_arch: input_state.arch.clone(),
-                    });
-
-                    let lua_config_path = base_config.lua_root.clone().unwrap_or(PathBuf::from(DEFAULT_LUA_CONFIG_PATH));
-                    let config = eval_lua_config(&lua_config_path, global_environment, input_state.options.clone(), &local_sources_path)
-                        .context("Failed to evaluate lua config")?;
-
-                    state.cached_hashes.insert(
-                        idx,
-                        collect_all_hashes(&config)
-                            .into_iter()
-                            .map(|(cat, hash)| (cat.to_string(), hash))
-                            .collect(),
-                    );
-                }
-
-                let live_recipe_hashes = state
-                    .cached_hashes
-                    .iter()
-                    .map(|(_, hashes)| hashes.into_iter())
-                    .flatten()
-                    .map(|(cat, hash)| (cat.as_str(), *hash))
-                    .collect::<HashSet<_>>();
-
-                store.prune_store(resolve_effective_hashes(&ledger, live_recipe_hashes.iter().copied())?)?;
-                ledger.prune(live_recipe_hashes)?;
-
-                Ok(())
-            })?;
-        }
         MainCommand::Cache(CacheOptions { cache: cache_path, command }) => match command {
             CacheCommand::Purge => {
                 let store = Store::get(cache_path.join(CACHE_SUBDIR_STORE)).context("Failed to get store")?;
@@ -782,6 +723,59 @@ pub fn run_cli() -> Result<()> {
                 store.prune_store(HashSet::new()).context("Failed to purge store")?;
                 ledger.prune(HashSet::new()).context("Failed to purge ledger")?;
             }
+            CacheCommand::Gc {
+                base_config: base_config_path,
+            } => {
+                let store = Store::get(cache_path.join(CACHE_SUBDIR_STORE)).context("Failed to get store")?;
+                let ledger = Ledger::get(cache_path.join(CACHE_FILENAME_LEDGER)).context("Failed to get ledger")?;
+
+                let local_sources_path = cache_path.join(CACHE_SUBDIR_LOCAL_SOURCES);
+                force_rm(&local_sources_path)?;
+
+                let base_config_path = base_config_path
+                    .canonicalize()
+                    .context("Failed to canonicalize (find absolute path of) base config")?;
+
+                let base_config = read_base_config(&base_config_path).context("Failed to read base config")?;
+                let target_prefix = base_config.target_prefix.unwrap_or(String::from(DEFAULT_TARGET_PREFIX));
+
+                with_state(&cache_path.join(CACHE_FILENAME_STATE), |state| {
+                    for (idx, input_state) in state.known_input_states.iter().enumerate() {
+                        let global_environment = Arc::new(GlobalEnvironment {
+                            global_environment_variables: BTreeMap::new(),
+                            rootfs_manifest_hash: base_config.rootfs.hash.clone(),
+                            target_prefix: target_prefix.clone(),
+                            target_arch: input_state.arch.clone(),
+                        });
+
+                        let lua_config_path = base_config.lua_root.clone().unwrap_or(PathBuf::from(DEFAULT_LUA_CONFIG_PATH));
+                        let config = eval_lua_config(&lua_config_path, global_environment, input_state.options.clone(), &local_sources_path)
+                            .context("Failed to evaluate lua config")?;
+
+                        state.cached_hashes.insert(
+                            idx,
+                            collect_all_hashes(&config)
+                                .into_iter()
+                                .map(|(cat, hash)| (cat.to_string(), hash))
+                                .collect(),
+                        );
+                    }
+
+                    let live_recipe_hashes = state
+                        .cached_hashes
+                        .iter()
+                        .map(|(_, hashes)| hashes.into_iter())
+                        .flatten()
+                        .map(|(cat, hash)| (cat.as_str(), *hash))
+                        .collect::<HashSet<_>>();
+
+                    store.prune_store(resolve_effective_hashes(&ledger, live_recipe_hashes.iter().copied())?)?;
+                    ledger.prune(live_recipe_hashes)?;
+
+                    Ok(())
+                })?;
+            }
+
             CacheCommand::ListLedger => {
                 let ledger = Ledger::get(cache_path.join(CACHE_FILENAME_LEDGER)).context("Failed to get ledger")?;
                 let records = ledger.list().context("Failed to list ledger records")?;
