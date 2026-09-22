@@ -9,5 +9,5 @@ chariot_runtime.workspace = true
 chariot_rootfs.workspace = true
 chariot_util.workspace = true
 thiserror.workspace = true
-xxhash-rust = { version = "0.8.18", features = ["xxh3"] }
+xxhash-rust.workspace = true
 rusqlite.workspace = true

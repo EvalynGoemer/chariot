@@ -190,6 +190,7 @@ dependencies = [
  "serde",
  "thiserror",
  "toml",
+ "xxhash-rust",
 ]
 
 [[package]]

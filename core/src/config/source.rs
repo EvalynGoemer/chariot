@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeMap,
     hash::{Hash, Hasher},
+    path::PathBuf,
     sync::Arc,
 };
 
@@ -34,10 +35,25 @@ pub struct GitSource {
     pub revision: String,
 }
 
+/// Creator must ensure the directory does not change until config is
+/// dropped. The hash will not be validated, it is taken at face value.
+#[derive(Debug)]
+pub struct LocalSource {
+    pub path: PathBuf,
+    pub hash: u128,
+}
+
+impl Hash for LocalSource {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u128(self.hash);
+    }
+}
+
 #[derive(Debug, Hash)]
 pub enum SourceBase {
     Archive(Archive),
     Git(GitSource),
+    Local(LocalSource),
 }
 
 #[derive(Debug)]

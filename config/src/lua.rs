@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fmt,
-    fs::read_to_string,
+    fs::{exists, read_to_string, rename},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -10,9 +10,14 @@ use chariot_core::config::{
     Config, Dependencies, GlobalEnvironment,
     package::{Package, PackagePlatform},
     script::{Script, ScriptLanguage},
-    source::{Archive, ArchiveCompression, ArchiveKind, GitSource, Source, SourceBase, SourcePrepare},
+    source::{Archive, ArchiveCompression, ArchiveKind, GitSource, LocalSource, Source, SourceBase, SourcePrepare},
+};
+use chariot_util::{
+    fs::{FileSystemError, copy_recursive, force_rm},
+    hash::hash_directory,
 };
 use mlua::{Error, ErrorContext, Lua, LuaOptions, StdLib, Table, UserData, Value};
+use xxhash_rust::xxh3::Xxh3;
 
 pub const EMBEDDED_LUA_FILE_META: &str = include_str!("./lua/meta.lua");
 pub const EMBEDDED_LUA_FILE_BUILTINS: &str = include_str!("./lua/builtins.lua");
@@ -127,6 +132,7 @@ pub fn eval_lua_config(
     )?;
     chariot_table.set("def_source", {
         let global_environment = global_environment.clone();
+        let local_source_storage = local_source_storage.as_ref().to_path_buf();
         lua.create_function(move |l, (base, patches, prepare): (Table, Option<Vec<String>>, Option<Table>)| {
             let base = match base.get::<String>("type").context("`type` must be a string")?.as_str() {
                 "archive" => {
@@ -161,6 +167,43 @@ pub fn eval_lua_config(
                     let revision = base.get::<String>("revision").context("`revision` must be a string")?;
 
                     SourceBase::Git(GitSource { url, revision })
+                }
+                "local" => {
+                    let path = PathBuf::from(base.get::<String>("path").context("`path` must be a string")?);
+
+                    let local_source = (|| -> Result<LocalSource, FileSystemError> {
+                        let path = path
+                            .canonicalize()
+                            .map_err(|err| FileSystemError::Canonicalize { path: path, source: err })?;
+
+                        let tmp_dir = local_source_storage.join(".tmp");
+                        force_rm(&tmp_dir)?;
+                        copy_recursive(path, &tmp_dir)?;
+
+                        let mut hasher = Xxh3::new();
+                        hash_directory(&tmp_dir, &mut hasher)?;
+                        let hash = hasher.digest128();
+
+                        let final_dir = local_source_storage.join(format!("{:x}", hash));
+
+                        if exists(&final_dir).map_err(|err| FileSystemError::Exists {
+                            path: final_dir.clone(),
+                            source: err,
+                        })? {
+                            force_rm(&final_dir)?;
+                        }
+
+                        rename(&tmp_dir, &final_dir).map_err(|err| FileSystemError::Rename {
+                            from: tmp_dir,
+                            to: final_dir.clone(),
+                            source: err,
+                        })?;
+
+                        Ok(LocalSource { path: final_dir, hash })
+                    })()
+                    .map_err(|err| Error::ExternalError(Arc::new(err)))?;
+
+                    SourceBase::Local(local_source)
                 }
                 t => return Err(Error::runtime(format!("invalid base type `{}`", t))),
             };

@@ -68,6 +68,20 @@ function Git(url, revision)
     }
 end
 
+--- Create a local source table.
+--- @param path string
+--- @return LocalSource
+function Local(path)
+    if type(path) ~= "string" then
+        error("local path must be a string")
+    end
+
+    return {
+        type = "local",
+        path = path
+    }
+end
+
 --- Define a source and return a reference to it.
 --- @param tbl { base: ArchiveSource|GitSource, patches?: string[], prepare: string, dependencies: Dependency[] }
 --- @return SourceRef

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, hash::Hash, io::Write, path::PathBuf};
 
 use chariot_runtime::{Mount, MountKind::OverlayFS, Overlay, OverlayUpperDirectory, RuntimeError};
-use chariot_util::fs::FileSystemError;
+use chariot_util::fs::{FileSystemError, copy_recursive};
 use thiserror::Error;
 use xxhash_rust::xxh3::Xxh3;
 
@@ -62,6 +62,11 @@ pub fn fetch_source(ctx: &CoreContext, logger: &mut dyn Write, source: &Source) 
             match &source.base {
                 SourceBase::Archive(archive) => fetch_archive(ctx, logger, &archive)?,
                 SourceBase::Git(git_source) => fetch_git_repository(ctx, logger, &git_source)?,
+                SourceBase::Local(local_source) => {
+                    let work_dir = WorkDirectory::create(&ctx.workdir_parent)?;
+                    copy_recursive(&local_source.path, work_dir.path())?;
+                    work_dir
+                }
             },
             "source.base",
             base_hash,

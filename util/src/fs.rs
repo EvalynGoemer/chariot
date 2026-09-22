@@ -17,6 +17,9 @@ use crate::lock::FileLockError;
 
 #[derive(Error, Debug)]
 pub enum FileSystemError {
+    #[error("Failed to canonicalize path `{}`", path.display())]
+    Canonicalize { path: PathBuf, source: io::Error },
+
     #[error("Failed to check existence of `{}`", path.display())]
     Exists { path: PathBuf, source: io::Error },
 

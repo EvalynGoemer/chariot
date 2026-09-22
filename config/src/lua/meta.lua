@@ -17,7 +17,11 @@
 ---@field url string
 ---@field revision string
 
----@alias SourceBase ArchiveSource|GitSource
+--- @class LocalSource
+--- @field type '"local"'
+--- @field path string
+
+---@alias SourceBase ArchiveSource|GitSource|LocalSource
 
 ---@alias Dependency string|SourceRef|PackageRef
 ---@alias Dependencies table<string|integer, Dependency>

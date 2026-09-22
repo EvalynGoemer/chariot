@@ -30,3 +30,4 @@ toml = "1.1.2"
 serde = "1.0.228"
 log = "0.4.33"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
+xxhash-rust = { version = "0.8.18", features = ["xxh3"] }
