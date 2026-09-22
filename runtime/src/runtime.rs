@@ -11,14 +11,23 @@ use std::{
 };
 
 use nix::{
+    fcntl::OFlag,
     mount::{MsFlags, mount},
     poll::{PollFd, PollFlags, poll},
     sched::{CloneFlags, unshare},
     sys::wait::{WaitPidFlag, WaitStatus, waitpid},
-    unistd::{ForkResult, Gid, Uid, chdir, chroot, dup2_stderr, dup2_stdout, execvp, fork, getegid, geteuid, pipe, read, setgid, setuid},
+    unistd::{
+        ForkResult, Gid, Uid, chdir, chroot, dup2_stderr, dup2_stdin, dup2_stdout, execvp, fork, getegid, geteuid, pipe2, read, setgid, setuid,
+    },
 };
 
-use crate::{Mount, MountKind, RuntimeError};
+use crate::{Mount, MountKind, RuntimeError, StderrTarget};
+
+enum StderrDest {
+    Pipe(OwnedFd),
+    MergeWithStdout,
+    Null,
+}
 
 pub(super) fn runtime_execute_bare(
     rootfs_path: impl AsRef<Path>,
@@ -29,16 +38,39 @@ pub(super) fn runtime_execute_bare(
     mounts: Vec<&Mount>,
     environment: HashMap<impl AsRef<OsStr>, impl AsRef<OsStr>>,
     network_isolation: bool,
-    logger: &mut dyn Write,
+    pipe_stdin: bool,
+    mut stdout: Option<&mut dyn Write>,
+    mut stderr: StderrTarget<'_>,
     args: Vec<impl AsRef<str>>,
 ) -> Result<i32, RuntimeError> {
-    let output_pipe = pipe().map_err(|errno| RuntimeError::Pipe { errno })?;
+    let stdout_pipe = match &stdout {
+        Some(_) => Some(pipe2(OFlag::O_CLOEXEC).map_err(|errno| RuntimeError::Pipe { errno })?),
+        None => None,
+    };
+    let stderr_pipe = match &stderr {
+        StderrTarget::Capture(_) => Some(pipe2(OFlag::O_CLOEXEC).map_err(|errno| RuntimeError::Pipe { errno })?),
+        StderrTarget::Discard | StderrTarget::Merge => None,
+    };
 
     let fork_result = unsafe { fork() }.map_err(|errno| RuntimeError::Fork { errno })?;
     match fork_result {
         ForkResult::Parent { child: child_pid } => {
+            let mut poll_fds = Vec::new();
+            if let Some((read_fd, _)) = &stdout_pipe {
+                poll_fds.push(PollFd::new(read_fd.as_fd(), PollFlags::POLLIN));
+            }
+            if let Some((read_fd, _)) = &stderr_pipe {
+                poll_fds.push(PollFd::new(read_fd.as_fd(), PollFlags::POLLIN));
+            }
+
+            if poll_fds.is_empty() {
+                return match waitpid(child_pid, None).map_err(|errno| RuntimeError::WaitPID { errno })? {
+                    WaitStatus::Exited(_, code) => Ok(code),
+                    status => Err(RuntimeError::InvalidWaitStatus { status }),
+                };
+            }
+
             let mut buffer = [0; 1024];
-            let mut poll_fds = [PollFd::new(output_pipe.0.as_fd(), PollFlags::POLLIN)];
             loop {
                 match waitpid(child_pid, Some(WaitPidFlag::WNOHANG)).map_err(|errno| RuntimeError::WaitPID { errno })? {
                     WaitStatus::StillAlive => {}
@@ -51,31 +83,60 @@ pub(super) fn runtime_execute_bare(
                     continue;
                 }
 
-                let pollin = poll_fds[0].revents().and_then(|flags| Some(flags.contains(PollFlags::POLLIN)));
-                if matches!(pollin, None | Some(false)) {
-                    continue;
+                let mut poll_idx = 0;
+
+                if let Some((read_fd, _)) = &stdout_pipe {
+                    let pollin = poll_fds[poll_idx].revents().map(|flags| flags.contains(PollFlags::POLLIN));
+                    if matches!(pollin, Some(true)) {
+                        let count = read(read_fd.as_fd(), &mut buffer).map_err(|errno| RuntimeError::Read { errno })?;
+                        if count > 0
+                            && let Some(writer) = stdout.as_deref_mut()
+                        {
+                            writer.write_all(&buffer[..count]).map_err(|err| RuntimeError::Write { source: err })?;
+                            writer.flush().map_err(|err| RuntimeError::Write { source: err })?;
+                        }
+                    }
+                    poll_idx += 1;
                 }
 
-                let count = read(output_pipe.0.as_fd(), &mut buffer).map_err(|errno| RuntimeError::Read { errno })?;
-                if count == 0 {
-                    continue;
+                if let Some((read_fd, _)) = &stderr_pipe {
+                    let pollin = poll_fds[poll_idx].revents().map(|flags| flags.contains(PollFlags::POLLIN));
+                    if matches!(pollin, Some(true)) {
+                        let count = read(read_fd.as_fd(), &mut buffer).map_err(|errno| RuntimeError::Read { errno })?;
+                        if count > 0
+                            && let StderrTarget::Capture(writer) = &mut stderr
+                        {
+                            writer.write_all(&buffer[..count]).map_err(|err| RuntimeError::Write { source: err })?;
+                            writer.flush().map_err(|err| RuntimeError::Write { source: err })?;
+                        }
+                    }
                 }
-
-                logger.write_all(&buffer[..count]).map_err(|err| RuntimeError::Write { source: err })?;
             }
         }
-        ForkResult::Child => child(
-            rootfs_path,
-            rootfs_readonly,
-            network_isolation,
-            uid,
-            gid,
-            cwd.as_ref(),
-            mounts,
-            environment,
-            args.iter().map(|arg| arg.as_ref().to_string()).collect(),
-            output_pipe.1,
-        ),
+        ForkResult::Child => {
+            let stdout_has_pipe = stdout_pipe.is_some();
+            let stdout_fd = stdout_pipe.map(|(_, write_fd)| write_fd);
+            let stderr_fd = match stderr_pipe {
+                Some((_, write_fd)) => StderrDest::Pipe(write_fd),
+                None if matches!(stderr, StderrTarget::Merge) && stdout_has_pipe => StderrDest::MergeWithStdout,
+                None => StderrDest::Null,
+            };
+
+            child(
+                rootfs_path,
+                rootfs_readonly,
+                network_isolation,
+                uid,
+                gid,
+                cwd.as_ref(),
+                mounts,
+                environment,
+                args.iter().map(|arg| arg.as_ref().to_string()).collect(),
+                pipe_stdin,
+                stdout_fd,
+                stderr_fd,
+            )
+        }
     }
 }
 
@@ -89,7 +150,9 @@ fn child(
     mounts: Vec<&Mount>,
     environment: HashMap<impl AsRef<OsStr>, impl AsRef<OsStr>>,
     args: Vec<String>,
-    output_fd: OwnedFd,
+    pipe_stdin: bool,
+    stdout_fd: Option<OwnedFd>,
+    stderr_fd: StderrDest,
 ) -> ! {
     panic::set_hook(Box::new(|info| {
         eprintln!(
@@ -124,7 +187,18 @@ fn child(
 
             panic!("waitpid returned invalid wait status");
         }
-        ForkResult::Child => init(rootfs_path, rootfs_readonly, network_isolation, cwd, mounts, environment, args, output_fd),
+        ForkResult::Child => init(
+            rootfs_path,
+            rootfs_readonly,
+            network_isolation,
+            cwd,
+            mounts,
+            environment,
+            args,
+            pipe_stdin,
+            stdout_fd,
+            stderr_fd,
+        ),
     }
 }
 
@@ -136,7 +210,9 @@ fn init(
     mounts: Vec<&Mount>,
     environment: HashMap<impl AsRef<OsStr>, impl AsRef<OsStr>>,
     args: Vec<String>,
-    output_fd: OwnedFd,
+    pipe_stdin: bool,
+    stdout_fd: Option<OwnedFd>,
+    stderr_fd: StderrDest,
 ) -> ! {
     panic::set_hook(Box::new(|info| {
         eprintln!("Chariot runtime (init process) panic `{}`", info.payload_as_str().unwrap_or("no message"));
@@ -273,11 +349,17 @@ fn init(
 
             panic!("waitpid returned invalid wait status");
         }
-        ForkResult::Child => program(environment, args, output_fd),
+        ForkResult::Child => program(environment, args, pipe_stdin, stdout_fd, stderr_fd),
     };
 }
 
-fn program(environment: HashMap<impl AsRef<OsStr>, impl AsRef<OsStr>>, args: Vec<String>, output_fd: OwnedFd) -> ! {
+fn program(
+    environment: HashMap<impl AsRef<OsStr>, impl AsRef<OsStr>>,
+    args: Vec<String>,
+    pipe_stdin: bool,
+    stdout_fd: Option<OwnedFd>,
+    stderr_fd: StderrDest,
+) -> ! {
     panic::set_hook(Box::new(|info| {
         eprintln!(
             "Chariot runtime (program process) panic `{}`",
@@ -286,8 +368,30 @@ fn program(environment: HashMap<impl AsRef<OsStr>, impl AsRef<OsStr>>, args: Vec
         exit(1);
     }));
 
-    dup2_stdout(output_fd.as_fd()).expect("dup2 stdout failed");
-    dup2_stderr(output_fd.as_fd()).expect("dup2 stderr failed");
+    if !pipe_stdin {
+        let dev_null = File::options().read(true).open("/dev/null").expect("open /dev/null failed");
+        dup2_stdin(dev_null.as_fd()).expect("dup2 stdin failed");
+    }
+
+    match &stdout_fd {
+        Some(fd) => dup2_stdout(fd.as_fd()).expect("dup2 stdout failed"),
+        None => {
+            let dev_null = File::options().write(true).open("/dev/null").expect("open /dev/null failed");
+            dup2_stdout(dev_null.as_fd()).expect("dup2 stdout failed");
+        }
+    }
+
+    match stderr_fd {
+        StderrDest::Pipe(fd) => dup2_stderr(fd.as_fd()).expect("dup2 stderr failed"),
+        StderrDest::MergeWithStdout => {
+            let fd = stdout_fd.as_ref().expect("stderr merge requested without a stdout pipe");
+            dup2_stderr(fd.as_fd()).expect("dup2 stderr failed");
+        }
+        StderrDest::Null => {
+            let dev_null = File::options().write(true).open("/dev/null").expect("open /dev/null failed");
+            dup2_stderr(dev_null.as_fd()).expect("dup2 stderr failed");
+        }
+    }
 
     for name in env::vars().map(|(name, _)| name).collect::<Vec<_>>() {
         unsafe {

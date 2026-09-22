@@ -5,7 +5,7 @@ use std::{
 };
 
 use chariot_rootfs::{CachedPkgSet, RootFSOverlay};
-use chariot_runtime::{Mount, MountKind, RuntimeError};
+use chariot_runtime::{Mount, MountKind, RuntimeError, StderrTarget};
 use chariot_util::fs::FileSystemError;
 use thiserror::Error;
 
@@ -128,7 +128,9 @@ pub fn package_create(
             ("PKG_REV", revision.to_string().as_str()),
             ("PKG_RDEPS", runtime_dependencies.join(" ").as_str())
         ]),
-        logger,
+        false,
+        Some(logger),
+        StderrTarget::Merge,
         vec![
             "bash",
             "-c",
@@ -159,7 +161,9 @@ pub fn package_create(
             ("PKG_VER", version),
             ("PKG_REV", revision.to_string().as_str()),
         ]),
-        logger,
+        false,
+        Some(logger),
+        StderrTarget::Merge,
         vec![
             "bash",
             "-c",
@@ -242,7 +246,9 @@ pub fn package_install(
             ("PKG_VER", version),
             ("PKG_REV", revision.to_string().as_str()),
         ]),
-        logger,
+        false,
+        Some(logger),
+        StderrTarget::Merge,
         vec![
             "bash",
             "-c",

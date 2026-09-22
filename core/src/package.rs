@@ -1,7 +1,7 @@
 use std::{hash::Hash, io::Write, path::PathBuf};
 
 use chariot_rootfs::{CachedPkgSet, GetPkgSetError};
-use chariot_runtime::{Mount, MountKind, RuntimeError};
+use chariot_runtime::{Mount, MountKind, RuntimeError, StderrTarget};
 use chariot_util::{fs::FileSystemError, hash::hash_directory};
 use thiserror::Error;
 use xxhash_rust::xxh3::Xxh3;
@@ -186,7 +186,7 @@ fn get_package_install(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
         .collect();
 
     if let Some(configure) = &package.configure {
-        let exit_code = exec_env.exec("/chariot/build", vec![&build_mount], &base_env, logger, configure.command())?;
+        let exit_code = exec_env.exec("/chariot/build", vec![&build_mount], &base_env, false, Some(logger), StderrTarget::Merge, configure.command())?;
 
         if exit_code != 0 {
             return Err(ProcessPackageError::Configure(exit_code));
@@ -194,7 +194,7 @@ fn get_package_install(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
     }
 
     if let Some(build) = &package.build {
-        let exit_code = exec_env.exec("/chariot/build", vec![&build_mount], &base_env, logger, build.command())?;
+        let exit_code = exec_env.exec("/chariot/build", vec![&build_mount], &base_env, false, Some(logger), StderrTarget::Merge, build.command())?;
 
         if exit_code != 0 {
             return Err(ProcessPackageError::Build(exit_code));
@@ -217,7 +217,9 @@ fn get_package_install(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
             },
         ],
         &base_env.into_iter().chain([("INSTALL_DIR", "/chariot/install")]).collect(),
-        logger,
+        false,
+        Some(logger),
+        StderrTarget::Merge,
         package.install.command(),
     )?;
 

@@ -7,7 +7,7 @@ use std::{
 };
 
 use chariot_rootfs::{CachedPkgSet, RootFSOverlay};
-use chariot_runtime::{Mount, MountKind, Overlay, RuntimeError};
+use chariot_runtime::{Mount, MountKind, Overlay, RuntimeError, StderrTarget};
 use chariot_util::{fs::FileSystemError, hash::hash_directory};
 use thiserror::Error;
 use xxhash_rust::xxh3::Xxh3;
@@ -164,7 +164,9 @@ impl<'a> ExecEnv<'a> {
         cwd: impl AsRef<Path>,
         mounts: Vec<&Mount>,
         environment: &HashMap<impl AsRef<str>, impl AsRef<str>>,
-        logger: &mut dyn Write,
+        stdin: bool,
+        stdout: Option<&mut dyn Write>,
+        stderr: StderrTarget<'_>,
         args: Vec<impl AsRef<str>>,
     ) -> Result<i32, RuntimeError> {
         let source_mounts = self
@@ -211,7 +213,9 @@ impl<'a> ExecEnv<'a> {
                 .into_iter()
                 .chain(environment.iter().map(|(k, v)| (k.as_ref(), v.as_ref())))
                 .collect(),
-            logger,
+            stdin,
+            stdout,
+            stderr,
             args,
             self.pkgset.as_deref(),
             self.tool_overlay.as_ref().map(|workdir| RootFSOverlay::ReadOnly(workdir.path())),

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, hash::Hash, io::Write, path::PathBuf};
 
 use chariot_rootfs::{CachedPkgSet, GetPkgSetError};
-use chariot_runtime::{Mount, MountKind::OverlayFS, Overlay, OverlayUpperDirectory, RuntimeError};
+use chariot_runtime::{Mount, MountKind::OverlayFS, Overlay, OverlayUpperDirectory, RuntimeError, StderrTarget};
 use chariot_util::fs::{FileSystemError, copy_recursive};
 use thiserror::Error;
 use xxhash_rust::xxh3::Xxh3;
@@ -99,7 +99,9 @@ pub fn fetch_source(ctx: &CoreContext, logger: &mut dyn Write, source: &Source) 
                             }),
                         }],
                         &HashMap::from([("CHARIOT_PATCH", patch)]),
-                        logger,
+                        false,
+                        Some(logger),
+                        StderrTarget::Merge,
                         Script::bash("echo \"$CHARIOT_PATCH\" | patch -p1").command(),
                         ctx.patch_pkgset.as_deref(),
                         None,
@@ -172,7 +174,9 @@ pub fn fetch_source(ctx: &CoreContext, logger: &mut dyn Write, source: &Source) 
                                 .map(|(k, v)| (k.as_str(), v.as_str()))
                                 .chain([("SOURCE_DIR", "/chariot/source")])
                                 .collect(),
-                            logger,
+                            false,
+                            Some(logger),
+                            StderrTarget::Merge,
                             prepare.script.command(),
                         )?;
 

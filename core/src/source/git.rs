@@ -1,6 +1,6 @@
 use std::{collections::HashMap, io::Write, path::PathBuf};
 
-use chariot_runtime::{Mount, MountKind, RuntimeError};
+use chariot_runtime::{Mount, MountKind, RuntimeError, StderrTarget};
 use chariot_util::fs::FileSystemError;
 use thiserror::Error;
 
@@ -50,7 +50,9 @@ pub fn fetch_git_repository(ctx: &CoreContext, logger: &mut dyn Write, git_sourc
         "/chariot/source",
         &vec![&source_bind],
         &HashMap::from([("GIT_URL", git_source.url.as_str()), ("GIT_REV", git_source.revision.as_str())]),
-        logger,
+        false,
+        Some(logger),
+        StderrTarget::Merge,
         Script::bash(
             r#"
             REMOTE_REF=$(git ls-remote "$GIT_URL" "refs/heads/$GIT_REV") || exit 1
@@ -76,7 +78,9 @@ pub fn fetch_git_repository(ctx: &CoreContext, logger: &mut dyn Write, git_sourc
         "/chariot/source",
         &vec![&source_bind],
         &HashMap::from([("GIT_URL", git_source.url.as_str())]),
-        logger,
+        false,
+        Some(logger),
+        StderrTarget::Merge,
         Script::bash("git clone --depth=1 \"$GIT_URL\" .").command(),
         ctx.git_pkgset.as_deref(),
         None,
@@ -90,7 +94,9 @@ pub fn fetch_git_repository(ctx: &CoreContext, logger: &mut dyn Write, git_sourc
         "/chariot/source",
         &vec![&source_bind],
         &HashMap::from([("GIT_REV", git_source.revision.as_str())]),
-        logger,
+        false,
+        Some(logger),
+        StderrTarget::Merge,
         Script::bash("git fetch --depth=1 origin \"$GIT_REV\"").command(),
         ctx.git_pkgset.as_deref(),
         None,
@@ -104,7 +110,9 @@ pub fn fetch_git_repository(ctx: &CoreContext, logger: &mut dyn Write, git_sourc
         "/chariot/source",
         &vec![&source_bind],
         &HashMap::<&str, &str>::new(),
-        logger,
+        false,
+        Some(logger),
+        StderrTarget::Merge,
         Script::bash("git checkout FETCH_HEAD").command(),
         ctx.git_pkgset.as_deref(),
         None,

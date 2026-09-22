@@ -7,7 +7,7 @@ use std::{
 };
 
 use chariot_rootfs::{CachedPkgSet, RootFS};
-use chariot_runtime::{Mount, MountKind, RuntimeError};
+use chariot_runtime::{Mount, MountKind, RuntimeError, StderrTarget};
 use chariot_util::fs::FileSystemError;
 use thiserror::Error;
 
@@ -93,7 +93,9 @@ pub fn download_archive(
         "/",
         &vec![&archive_binding],
         &HashMap::from([("ARCHIVE_URL", url)]),
-        logger,
+        false,
+        Some(logger),
+        StderrTarget::Merge,
         Script::bash("wget --no-hsts -qO /chariot/archive \"$ARCHIVE_URL\"").command(),
         wget_pkgset,
         None,
@@ -107,7 +109,9 @@ pub fn download_archive(
         "/",
         &vec![&archive_binding],
         &HashMap::from([("ARCHIVE_CHECKSUM", checksum)]),
-        logger,
+        false,
+        Some(logger),
+        StderrTarget::Merge,
         Script::bash("echo \"$ARCHIVE_CHECKSUM  /chariot/archive\n\" | sha256sum -c -").command(),
         sha256sum_pkgset,
         None,
@@ -160,7 +164,9 @@ pub fn extract_archive(
             },
         ],
         &HashMap::<&str, &str>::new(),
-        logger,
+        false,
+        Some(logger),
+        StderrTarget::Merge,
         Script::bash(format!(
             "bsdtar --no-same-owner --strip-components 1 -x {} -C /chariot/dest -f /chariot/source",
             compression_flag

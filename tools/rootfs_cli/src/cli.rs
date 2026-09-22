@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::{Context, bail};
-use chariot_rootfs::{CachedPkgSet, DEFAULT_MANIFESTS_URL, GetPkgSetError, ManifestFetchSpec, PkgSetState, RootFS};
+use chariot_rootfs::{CachedPkgSet, DEFAULT_MANIFESTS_URL, GetPkgSetError, ManifestFetchSpec, PkgSetState, RootFS, StderrTarget};
 use clap::{Parser, Subcommand};
 use log::info;
 
@@ -136,7 +136,9 @@ pub fn run_cli() -> Result<(), anyhow::Error> {
                 &cwd,
                 &vec![],
                 &environment,
-                &mut logger,
+                true,
+                Some(&mut logger),
+                StderrTarget::Merge,
                 args.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
                 pkgset.as_deref(),
                 None,

@@ -27,7 +27,7 @@ use chariot_core::{
     workdir::WorkDirectoryParent,
     xbps::package_install,
 };
-use chariot_rootfs::{CachedPkgSet, DEFAULT_MANIFESTS_URL, ManifestFetchSpec, RootFS};
+use chariot_rootfs::{CachedPkgSet, DEFAULT_MANIFESTS_URL, ManifestFetchSpec, RootFS, StderrTarget};
 use chariot_runtime::{Mount, MountKind};
 use chariot_util::{
     fs::{force_rm, make_path},
@@ -200,6 +200,15 @@ struct ExecOptions {
 
     #[arg(long, help = "script language", default_value = "bash", value_parser = parse_language)]
     language: ScriptLanguage,
+
+    #[arg(long, help = "forward stdin into execution environment")]
+    stdin: bool,
+
+    #[arg(long, help = "forward stdout from execution environment")]
+    no_stdout: bool,
+
+    #[arg(long, help = "forward stderr from execution environment")]
+    no_stderr: bool,
 
     #[arg(help = "script to execute")]
     command: String,
@@ -654,11 +663,22 @@ pub fn run_cli() -> Result<()> {
             }
 
             let script = Script::new(exec_options.language, exec_options.command);
+
+            let mut stderr_handle = stderr();
+            let mut stdout_handle = stdout();
             exec_env.exec(
                 exec_options.cwd,
                 mounts.iter().collect(),
                 &exec_options.env_var.iter().map(|(var, value)| (var.as_str(), value.as_str())).collect(),
-                &mut stdout(),
+                exec_options.stdin,
+                match exec_options.no_stdout {
+                    true => None,
+                    false => Some(&mut stdout_handle),
+                },
+                match exec_options.no_stderr {
+                    true => StderrTarget::Discard,
+                    false => StderrTarget::Capture(&mut stderr_handle),
+                },
                 script.command(),
             )?;
         }

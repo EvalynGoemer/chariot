@@ -58,6 +58,12 @@ pub struct Mount {
     pub kind: MountKind,
 }
 
+pub enum StderrTarget<'a> {
+    Discard,
+    Merge,
+    Capture(&'a mut dyn Write),
+}
+
 #[derive(Debug)]
 pub enum RuntimeError {
     Read { errno: Errno },
@@ -126,7 +132,9 @@ pub fn runtime_execute(
     late_mounts: &Vec<&Mount>,
     environment: &HashMap<impl AsRef<str>, impl AsRef<str>>,
     network_isolation: bool,
-    logger: &mut dyn Write,
+    stdin: bool,
+    stdout: Option<&mut dyn Write>,
+    stderr: StderrTarget<'_>,
     args: Vec<impl AsRef<str>>,
 ) -> Result<i32, RuntimeError> {
     let mut default_env: HashMap<&OsStr, &OsStr> = HashMap::new();
@@ -203,7 +211,9 @@ pub fn runtime_execute(
         new_mounts,
         default_env,
         network_isolation,
-        logger,
+        stdin,
+        stdout,
+        stderr,
         args,
     )
 }

@@ -24,6 +24,7 @@ use crate::{
     state::{CachedManifest, State},
 };
 
+pub use chariot_runtime::StderrTarget;
 pub use manifest::ManifestFetchSpec;
 pub use pkgset::{CachedPkgSet, GetPkgSetError, PkgSetState};
 pub use state::{StateReadError, StateWriteError};
@@ -242,7 +243,9 @@ impl RootFS {
             &vec![],
             &HashMap::<&str, &str>::new(),
             false,
-            logger,
+            false,
+            Some(logger),
+            StderrTarget::Merge,
             vec!["bash", "-c", &setup_command],
         )?;
 
@@ -354,7 +357,9 @@ impl RootFS {
             &vec![],
             &HashMap::<&str, &str>::new(),
             false,
-            logger,
+            false,
+            Some(logger),
+            StderrTarget::Merge,
             vec![
                 "bash",
                 "-c",
@@ -404,7 +409,9 @@ impl RootFS {
             &vec![],
             &HashMap::<&str, &str>::new(),
             false,
-            logger,
+            false,
+            Some(logger),
+            StderrTarget::Merge,
             vec![
                 "bash",
                 "-c",
@@ -511,7 +518,9 @@ impl RootFS {
         cwd: impl AsRef<Path>,
         mounts: &Vec<&Mount>,
         environment: &HashMap<impl AsRef<str>, impl AsRef<str>>,
-        logger: &mut dyn Write,
+        stdin: bool,
+        stdout: Option<&mut dyn Write>,
+        stderr: StderrTarget<'_>,
         args: Vec<impl AsRef<str>>,
         pkgset: Option<&CachedPkgSet>,
         rootfs_overlay: Option<RootFSOverlay>,
@@ -561,7 +570,9 @@ impl RootFS {
             mounts,
             environment,
             false,
-            logger,
+            stdin,
+            stdout,
+            stderr,
             args,
         )
     }
