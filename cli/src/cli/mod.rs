@@ -12,7 +12,7 @@ use anyhow::{Context, Result, bail};
 use chariot_config::{DEFAULT_BASE_CONFIG_PATH, DEFAULT_LUA_CONFIG_PATH, base::read_base_config, lua::eval_lua_config};
 use chariot_core::{
     CoreContext, DEFAULT_TARGET_PREFIX,
-    buildcache::BuildCache,
+    buildcache::{BuildCache, BuildDirectory},
     collect_all_hashes,
     config::{
         Config, GlobalEnvironment,
@@ -171,6 +171,9 @@ struct ExecOptions {
 
     #[arg(long, help = "make execution environment reflect the build environment of a package")]
     build_env: Option<String>,
+
+    #[arg(short, long, help = "mount package build directory into execution environment", value_name = "DEST_PATH=PACKAGE_NAME", value_parser = parse_kv)]
+    build_dir: Vec<(String, String)>,
 
     #[arg(long, help = "native packages to install into the execution environment", value_delimiter = ',')]
     native_pkg: Vec<String>,
@@ -608,7 +611,7 @@ pub fn run_cli() -> Result<()> {
                 &tools.into_iter().cloned().collect(),
             )?;
 
-            let mounts = exec_options
+            let mut mounts = exec_options
                 .mount
                 .into_iter()
                 .map(|(from, to, read_only, is_file)| Mount {
@@ -620,6 +623,23 @@ pub fn run_cli() -> Result<()> {
                     },
                 })
                 .collect::<Vec<_>>();
+
+            let mut _build_directories = Vec::new();
+            for (dest, pkg_name) in exec_options.build_dir {
+                let build_dir = BuildDirectory::get_read_only(&ctx.build_cache, PackagePlatform::Target, &config.global_env.target_arch, &pkg_name)
+                    .with_context(|| format!("Failed to get build directory for package `{}`", pkg_name))?;
+
+                mounts.push(Mount {
+                    dest: PathBuf::from(dest),
+                    kind: MountKind::Bind {
+                        from: build_dir.path(),
+                        read_only: true,
+                        is_file: false,
+                    },
+                });
+
+                _build_directories.push(build_dir);
+            }
 
             let script = Script::new(exec_options.language, exec_options.command);
             exec_env.exec(

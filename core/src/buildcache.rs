@@ -6,10 +6,12 @@ use std::{
 
 use chariot_util::{
     fs::{FileSystemError, dir_entries, force_rm, make_path},
-    lock::{DirLock, LockExclusive, block_attempted},
+    lock::{DirLock, LockExclusive, LockShared, block_attempted},
 };
 
 use crate::config::package::PackagePlatform;
+
+const CONTENT_SUBDIR: &str = "content";
 
 pub struct BuildCache {
     path: PathBuf,
@@ -54,7 +56,8 @@ impl BuildCache {
 }
 
 pub struct BuildDirectory {
-    _lock: DirLock<LockExclusive>,
+    _dir_lock: DirLock<LockShared>,
+    _exclusive_lock: Option<DirLock<LockExclusive>>,
     build_cache: Arc<BuildCache>,
     platform: PackagePlatform,
     arch: String,
@@ -62,16 +65,28 @@ pub struct BuildDirectory {
 }
 
 impl BuildDirectory {
-    pub fn get(build_cache: &Arc<BuildCache>, platform: PackagePlatform, arch: &str, name: &str) -> Result<Self, FileSystemError> {
+    fn generic_get(
+        build_cache: &Arc<BuildCache>,
+        platform: PackagePlatform,
+        arch: &str,
+        name: &str,
+        exclusive: bool,
+    ) -> Result<Self, FileSystemError> {
         let _build_cache_lock = DirLock::shared(&build_cache.path);
 
         let path = build_cache.dir_path(platform, &arch, &name);
-        make_path(&path)?;
+        let content_path = path.join(CONTENT_SUBDIR);
+        make_path(&content_path)?;
 
-        let lock = DirLock::exclusive(path)?;
+        let exclusive_lock = match exclusive {
+            true => Some(DirLock::exclusive(content_path)?),
+            false => None,
+        };
+        let shared_lock = DirLock::shared_noblock(path)?;
 
-        Ok(BuildDirectory {
-            _lock: lock,
+        Ok(Self {
+            _dir_lock: shared_lock,
+            _exclusive_lock: exclusive_lock,
             build_cache: build_cache.clone(),
             platform,
             arch: arch.to_string(),
@@ -79,7 +94,15 @@ impl BuildDirectory {
         })
     }
 
+    pub fn get(build_cache: &Arc<BuildCache>, platform: PackagePlatform, arch: &str, name: &str) -> Result<Self, FileSystemError> {
+        BuildDirectory::generic_get(build_cache, platform, arch, name, true)
+    }
+
+    pub fn get_read_only(build_cache: &Arc<BuildCache>, platform: PackagePlatform, arch: &str, name: &str) -> Result<Self, FileSystemError> {
+        BuildDirectory::generic_get(build_cache, platform, arch, name, false)
+    }
+
     pub fn path(&self) -> PathBuf {
-        self.build_cache.dir_path(self.platform, &self.arch, &self.name)
+        self.build_cache.dir_path(self.platform, &self.arch, &self.name).join(CONTENT_SUBDIR)
     }
 }
