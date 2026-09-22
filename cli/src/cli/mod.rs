@@ -175,7 +175,12 @@ struct ExecOptions {
     #[arg(short, long, help = "mount package build directory into execution environment", value_name = "DEST_PATH=PACKAGE_NAME", value_parser = parse_kv)]
     build_dir: Vec<(String, String)>,
 
-    #[arg(long, help = "native packages to install into the execution environment", value_delimiter = ',')]
+    #[arg(
+        short = 'p',
+        long,
+        help = "native packages to install into the execution environment",
+        value_delimiter = ','
+    )]
     native_pkg: Vec<String>,
 
     #[arg(long, help = "host packages to install into the execution environment", value_delimiter = ',')]
