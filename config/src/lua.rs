@@ -104,11 +104,44 @@ fn parse_dependencies_table(table: Table) -> Result<Dependencies, mlua::Error> {
     Ok(dependencies)
 }
 
+fn make_local_source(local_source_storage: &Path, from_path: &Path) -> Result<LocalSource, FileSystemError> {
+    let path = from_path.canonicalize().map_err(|err| FileSystemError::Canonicalize {
+        path: from_path.to_path_buf(),
+        source: err,
+    })?;
+
+    let tmp_dir = local_source_storage.join(".tmp");
+    force_rm(&tmp_dir)?;
+    copy_recursive(path, &tmp_dir)?;
+
+    let mut hasher = Xxh3::new();
+    hash_directory(&tmp_dir, &mut hasher)?;
+    let hash = hasher.digest128();
+
+    let final_dir = local_source_storage.join(format!("{:x}", hash));
+
+    if exists(&final_dir).map_err(|err| FileSystemError::Exists {
+        path: final_dir.clone(),
+        source: err,
+    })? {
+        force_rm(&final_dir)?;
+    }
+
+    rename(&tmp_dir, &final_dir).map_err(|err| FileSystemError::Rename {
+        from: tmp_dir,
+        to: final_dir.clone(),
+        source: err,
+    })?;
+
+    Ok(LocalSource { path: final_dir, hash })
+}
+
 pub fn eval_lua_config(
     path: impl AsRef<Path>,
     global_environment: Arc<GlobalEnvironment>,
     options: HashMap<String, String>,
     local_source_storage: impl AsRef<Path>,
+    source_overrides: HashMap<(String, PackagePlatform), HashMap<String, PathBuf>>,
 ) -> Result<Config, LuaConfigError> {
     let lua = Lua::new_with(StdLib::MATH | StdLib::STRING | StdLib::TABLE | StdLib::PACKAGE, LuaOptions::new())?;
 
@@ -121,6 +154,8 @@ pub fn eval_lua_config(
     for (k, v) in options {
         options_table.set(k, lua.create_string(v)?)?;
     }
+
+    let source_overrides = Arc::new(source_overrides);
 
     let chariot_table = lua.create_table()?;
     chariot_table.set("options", options_table)?;
@@ -171,37 +206,7 @@ pub fn eval_lua_config(
                 "local" => {
                     let path = PathBuf::from(base.get::<String>("path").context("`path` must be a string")?);
 
-                    let local_source = (|| -> Result<LocalSource, FileSystemError> {
-                        let path = path
-                            .canonicalize()
-                            .map_err(|err| FileSystemError::Canonicalize { path: path, source: err })?;
-
-                        let tmp_dir = local_source_storage.join(".tmp");
-                        force_rm(&tmp_dir)?;
-                        copy_recursive(path, &tmp_dir)?;
-
-                        let mut hasher = Xxh3::new();
-                        hash_directory(&tmp_dir, &mut hasher)?;
-                        let hash = hasher.digest128();
-
-                        let final_dir = local_source_storage.join(format!("{:x}", hash));
-
-                        if exists(&final_dir).map_err(|err| FileSystemError::Exists {
-                            path: final_dir.clone(),
-                            source: err,
-                        })? {
-                            force_rm(&final_dir)?;
-                        }
-
-                        rename(&tmp_dir, &final_dir).map_err(|err| FileSystemError::Rename {
-                            from: tmp_dir,
-                            to: final_dir.clone(),
-                            source: err,
-                        })?;
-
-                        Ok(LocalSource { path: final_dir, hash })
-                    })()
-                    .map_err(|err| Error::ExternalError(Arc::new(err)))?;
+                    let local_source = make_local_source(&local_source_storage, &path).map_err(|err| Error::ExternalError(Arc::new(err)))?;
 
                     SourceBase::Local(local_source)
                 }
@@ -235,6 +240,8 @@ pub fn eval_lua_config(
     })?;
     chariot_table.set("def_package", {
         let global_environment = global_environment.clone();
+        let source_overrides = source_overrides.clone();
+        let local_source_storage = local_source_storage.as_ref().to_path_buf();
         lua.create_function(move |l, pkg: Table| {
             let platform = pkg.get::<String>("platform").context("`platform` must be a string")?;
             let name = pkg.get::<String>("name").context("`name` must be a string")?;
@@ -263,7 +270,23 @@ pub fn eval_lua_config(
                 return Err(Error::runtime(format!("a package with the name `{}` already exists", name)));
             }
 
-            let dependencies = parse_dependencies_table(dependencies)?;
+            let mut dependencies = parse_dependencies_table(dependencies)?;
+
+            if let Some(overrides) = source_overrides.get(&(name.clone(), platform)) {
+                for (name, path) in overrides {
+                    let local_source = make_local_source(&local_source_storage, &path).map_err(|err| Error::ExternalError(Arc::new(err)))?;
+
+                    let source = Arc::new(Source {
+                        base: SourceBase::Local(local_source),
+                        patches: Vec::new(),
+                        prepare: None,
+                    });
+
+                    l.app_data_mut::<ChariotAppData>().unwrap().sources.push(source.clone());
+
+                    dependencies.sources.insert(name.clone(), source);
+                }
+            }
 
             let runtime_dependencies = {
                 let mut rdeps = Vec::new();

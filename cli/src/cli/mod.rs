@@ -399,7 +399,14 @@ fn build_prepare(build_opts: CommonBuildOptions, local_config: &CliConfig) -> Re
         });
 
         let lua_config_path = config_dir.join(base_config.lua_root.clone().unwrap_or(PathBuf::from(DEFAULT_LUA_CONFIG_PATH)));
-        let config = eval_lua_config(&lua_config_path, global_environment, options, local_sources_path).context("Failed to evaluate lua config")?;
+        let config = eval_lua_config(
+            &lua_config_path,
+            global_environment,
+            options,
+            local_sources_path,
+            local_config.get_source_override_map(),
+        )
+        .context("Failed to evaluate lua config")?;
 
         state.cached_hashes.insert(
             input_state_index,
@@ -749,8 +756,14 @@ pub fn run_cli() -> Result<()> {
                         });
 
                         let lua_config_path = base_config.lua_root.clone().unwrap_or(PathBuf::from(DEFAULT_LUA_CONFIG_PATH));
-                        let config = eval_lua_config(&lua_config_path, global_environment, input_state.options.clone(), &local_sources_path)
-                            .context("Failed to evaluate lua config")?;
+                        let config = eval_lua_config(
+                            &lua_config_path,
+                            global_environment,
+                            input_state.options.clone(),
+                            &local_sources_path,
+                            local_config.get_source_override_map(),
+                        )
+                        .context("Failed to evaluate lua config")?;
 
                         state.cached_hashes.insert(
                             idx,
@@ -775,7 +788,6 @@ pub fn run_cli() -> Result<()> {
                     Ok(())
                 })?;
             }
-
             CacheCommand::ListLedger => {
                 let ledger = Ledger::get(cache_path.join(CACHE_FILENAME_LEDGER)).context("Failed to get ledger")?;
                 let records = ledger.list().context("Failed to list ledger records")?;
