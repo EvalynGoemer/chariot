@@ -111,28 +111,73 @@ function Source(tbl)
     return chariot.def_source(base, patches, prepare)
 end
 
-local function pkg_helper(tbl)
-    if tbl["dependencies"] == nil then
-        tbl["dependencies"] = {}
+local function pkg_helper(platform, tbl)
+    if platform ~= "target" and platform ~= "host" then
+        error("wux fucked up, invalid platform " .. platform)
     end
 
-    if tbl["runtime_dependencies"] == nil then
-        tbl["runtime_dependencies"] = {}
+    local pkg = {}
+
+    pkg["platform"] = platform
+
+    local keytypes <const> = {
+        name = { true, "string" },
+        version = { true, "string" },
+        revision = { true, "number" },
+        configure = { false, "string" },
+        build = { false, "string" },
+        install = { true, "string" },
+    }
+
+    for key, types in pairs(keytypes) do
+        if (types[1] and type(tbl[key]) ~= types[2]) and type(tbl[key]) ~= "nil" then
+            error(key .. " must be a " .. types[2])
+        end
+
+        pkg[key] = tbl[key]
     end
 
-    return chariot.def_package(tbl)
+    pkg["dependencies"] = {}
+    if type(tbl["dependencies"]) ~= "nil" then
+        if type(tbl["dependencies"]) ~= "table" then
+            error("dependencies must be a table or nil")
+        end
+
+        for k, v in pairs(tbl["dependencies"]) do
+            local key = k
+            if k == "_" then
+                key = pkg["name"]
+            end
+            pkg["dependencies"][key] = v
+        end
+    end
+
+    pkg["runtime_dependencies"] = {}
+    if type(tbl["runtime_dependencies"]) ~= "nil" then
+        if type(tbl["runtime_dependencies"]) ~= "table" then
+            error("runtime_dependencies must be a table or nil")
+        end
+
+        for k, v in pairs(tbl["runtime_dependencies"]) do
+            if type(k) ~= "number" then
+                error("runtime_dependencies must only contain numeric keys")
+            end
+
+            pkg["runtime_dependencies"][k] = v
+        end
+    end
+
+    return chariot.def_package(pkg)
 end
 
 --- Define a target package and return a reference to it.
 --- @param pkg { name: string, version: string, revision: number, dependencies?: Dependency[], runtime_dependencies?: PackageRef[], configure?: string, build?: string, install: string }
 function Package(pkg)
-    pkg["platform"] = "target"
-    return pkg_helper(pkg)
+    return pkg_helper("target", pkg)
 end
 
 --- Define a host package and return a reference to it.
 --- @param tool { name: string, version: string, revision: number, dependencies?: Dependency[], runtime_dependencies?: PackageRef[], configure?: string, build?: string, install: string }
 function Tool(tool)
-    tool["platform"] = "host"
-    return pkg_helper(tool)
+    return pkg_helper("host", tool)
 end
