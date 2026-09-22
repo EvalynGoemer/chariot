@@ -1,5 +1,6 @@
 use std::{collections::HashMap, hash::Hash, io::Write, path::PathBuf};
 
+use chariot_rootfs::{CachedPkgSet, GetPkgSetError};
 use chariot_runtime::{Mount, MountKind::OverlayFS, Overlay, OverlayUpperDirectory, RuntimeError};
 use chariot_util::fs::{FileSystemError, copy_recursive};
 use thiserror::Error;
@@ -11,7 +12,7 @@ use crate::{
         script::Script,
         source::{Source, SourceBase},
     },
-    dependencies::{ResolveDependenciesError, resolve_dependencies},
+    execenv::{CreateExecEnvError, ExecEnv},
     source::{
         archive::{ArchiveFetchError, fetch_archive},
         git::{GitFetchError, fetch_git_repository},
@@ -35,7 +36,10 @@ pub enum SourceFetchError {
     Database(#[from] rusqlite::Error),
 
     #[error(transparent)]
-    ResolveDependencies(#[from] Box<ResolveDependenciesError>), // TODO: box here is nasty
+    ResolveDependencies(#[from] Box<CreateExecEnvError>), // TODO: this box is nasty
+
+    #[error(transparent)]
+    GetPkgSet(#[from] GetPkgSetError),
 
     #[error(transparent)]
     Archive(#[from] ArchiveFetchError),
@@ -52,7 +56,6 @@ pub enum SourceFetchError {
 
 pub fn fetch_source(ctx: &CoreContext, logger: &mut dyn Write, source: &Source) -> Result<Vec<StoreEntry>, SourceFetchError> {
     let mut store_entries = Vec::new();
-    // let (base_hash, patch_hash, prepare_hash) = source.get_hashes();
 
     let base_hash = source.get_base_hash();
     let base_store_entry = match StoreEntry::get(&ctx.store, "source.base", base_hash)? {
@@ -125,13 +128,21 @@ pub fn fetch_source(ctx: &CoreContext, logger: &mut dyn Write, source: &Source) 
         let prepare_store_entry = match cached_entry {
             Some(store_entry) => store_entry,
             None => {
-                let exec_env = resolve_dependencies(ctx, logger, &prepare.dependencies).map_err(|err| Box::new(err))?;
-                let deps_input_hash = exec_env.compute_deps_hash()?;
+                let pkgset = CachedPkgSet::get(&ctx.rootfs, &ctx.root_pkgset, &prepare.dependencies.native, logger)?;
+                let exec_env = ExecEnv::create(
+                    ctx,
+                    logger,
+                    pkgset,
+                    &prepare.dependencies.sources,
+                    &prepare.dependencies.packages,
+                    &prepare.dependencies.tools,
+                )
+                .map_err(|err| Box::new(err))?;
 
                 let effective_hash = {
                     let mut hasher = Xxh3::new();
                     prepare_hash_base.hash(&mut hasher);
-                    deps_input_hash.hash(&mut hasher);
+                    exec_env.compute_deps_hash()?.hash(&mut hasher);
                     hasher.digest128()
                 };
 

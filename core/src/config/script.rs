@@ -30,7 +30,7 @@ impl Script {
         Script::new(ScriptLanguage::Bash, text)
     }
 
-    pub(crate) fn command(&self) -> Vec<String> {
+    pub fn command(&self) -> Vec<String> {
         match self.language {
             ScriptLanguage::Python => vec![String::from("python3"), String::from("-c"), self.text.clone()],
             ScriptLanguage::Bash => vec![

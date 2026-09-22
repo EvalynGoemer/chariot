@@ -1,5 +1,6 @@
 use std::{hash::Hash, io::Write, path::PathBuf};
 
+use chariot_rootfs::{CachedPkgSet, GetPkgSetError};
 use chariot_runtime::{Mount, MountKind, RuntimeError};
 use chariot_util::{fs::FileSystemError, hash::hash_directory};
 use thiserror::Error;
@@ -9,7 +10,7 @@ use crate::{
     CoreContext,
     buildcache::BuildDirectory,
     config::package::Package,
-    dependencies::{ResolveDependenciesError, resolve_dependencies},
+    execenv::{CreateExecEnvError, ExecEnv},
     source::SourceFetchError,
     store::StoreEntry,
     workdir::WorkDirectory,
@@ -19,7 +20,7 @@ use crate::{
 #[derive(Debug, Error)]
 pub enum ProcessPackageError {
     #[error(transparent)]
-    ResolveDependencies(#[from] Box<ResolveDependenciesError>), // TODO: this box is nasty
+    ResolveDependencies(#[from] Box<CreateExecEnvError>), // TODO: this box is nasty
 
     #[error(transparent)]
     FileSystem(#[from] FileSystemError),
@@ -29,6 +30,9 @@ pub enum ProcessPackageError {
 
     #[error(transparent)]
     Runtime(#[from] RuntimeError),
+
+    #[error(transparent)]
+    GetPkgSet(#[from] GetPkgSetError),
 
     #[error(transparent)]
     PackageCreate(#[from] XBPSPackageCreateError),
@@ -44,6 +48,21 @@ pub enum ProcessPackageError {
 
     #[error("Install failed with the exit code {}", .0)]
     Install(i32),
+}
+
+pub fn resolve_package_runtime_dependencies(
+    ctx: &CoreContext,
+    logger: &mut dyn Write,
+    pkg: &Package,
+) -> Result<Vec<StoreEntry>, ProcessPackageError> {
+    let mut entries = vec![process_package(ctx, logger, pkg)?];
+
+    for rdep in &pkg.runtime_dependencies {
+        assert!(rdep.platform == pkg.platform);
+        entries.extend(resolve_package_runtime_dependencies(ctx, logger, rdep)?);
+    }
+
+    Ok(entries)
 }
 
 pub fn process_package(ctx: &CoreContext, logger: &mut dyn Write, package: &Package) -> Result<StoreEntry, ProcessPackageError> {
@@ -72,7 +91,7 @@ pub fn process_package(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
     let runtime_deps = package
         .runtime_dependencies
         .iter()
-        .map(|pkg| format!("{}>={}_{}", pkg.name, pkg.version, pkg.revision))
+        .map(|pkg| format!("{}>={}_{}", pkg.name, pkg.version, pkg.revision)) // TODO: this is xbps specific and should be done in xbps.rs somehow
         .collect::<Vec<_>>();
 
     let workdir = WorkDirectory::create(&ctx.workdir_parent)?;
@@ -103,13 +122,21 @@ fn get_package_install(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
         return Ok(store_entry);
     }
 
-    let exec_env = resolve_dependencies(ctx, logger, &package.dependencies).map_err(|err| Box::new(err))?;
-    let deps_input_hash = exec_env.compute_deps_hash()?;
+    let pkgset = CachedPkgSet::get(&ctx.rootfs, &ctx.root_pkgset, &package.dependencies.native, logger)?;
+    let exec_env = ExecEnv::create(
+        ctx,
+        logger,
+        pkgset,
+        &package.dependencies.sources,
+        &package.dependencies.packages,
+        &package.dependencies.tools,
+    )
+    .map_err(|err| Box::new(err))?;
 
     let effective_hash = {
         let mut hasher = Xxh3::new();
         package.get_content_base_hash().hash(&mut hasher);
-        deps_input_hash.hash(&mut hasher);
+        exec_env.compute_deps_hash()?.hash(&mut hasher);
         hasher.digest128()
     };
 

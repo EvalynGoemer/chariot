@@ -110,8 +110,7 @@ pub fn run_cli() -> Result<(), anyhow::Error> {
             }
         }
         MainCommand::Pkgset(PkgsetCommand::Cache { packages }) => {
-            CachedPkgSet::get(&rootfs, None, &BTreeSet::from_iter(packages.iter().map(|s| s.as_str())), &mut logger)
-                .context("failed to get cached package set")?;
+            CachedPkgSet::get(&rootfs, &None, &BTreeSet::from_iter(packages.iter()), &mut logger).context("failed to get cached package set")?;
         }
         MainCommand::Exec { packages, cwd, env, args } => {
             let environment: HashMap<String, String> = env
@@ -125,8 +124,7 @@ pub fn run_cli() -> Result<(), anyhow::Error> {
             let pkgset = if packages.is_empty() {
                 None
             } else {
-                let set: BTreeSet<&str> = packages.iter().map(|s| s.as_str()).collect();
-                match CachedPkgSet::get(&rootfs, None, &set, &mut logger) {
+                match CachedPkgSet::get(&rootfs, &None, &BTreeSet::from_iter(packages), &mut logger) {
                     Ok(ps) => ps,
                     Err(GetPkgSetError::DownloadPackageError { name }) => bail!("failed to download package: {name}"),
                     Err(GetPkgSetError::InstallPackageError { name }) => bail!("failed to install package: {name}"),

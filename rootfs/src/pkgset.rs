@@ -45,8 +45,8 @@ pub struct CachedPkgSet {
 impl CachedPkgSet {
     pub fn get(
         rootfs: &Arc<RootFS>,
-        base: Option<Arc<CachedPkgSet>>,
-        pkgset: &BTreeSet<&str>,
+        base: &Option<Arc<CachedPkgSet>>,
+        pkgset: &BTreeSet<impl AsRef<str>>,
         logger: &mut dyn Write,
     ) -> Result<Option<Arc<Self>>, GetPkgSetError> {
         if pkgset.is_empty() {
@@ -59,7 +59,10 @@ impl CachedPkgSet {
 
         let _pkgsets_lock = DirLock::exclusive(rootfs.sub_path(RootFSPath::PackageSets))?;
 
-        let id = rootfs.db.lock().unwrap().get_pkgset_id(base.as_ref().map(|pkgset| pkgset.id), pkgset)?;
+        let id = rootfs.db.lock().unwrap().get_pkgset_id(
+            base.as_ref().map(|pkgset| pkgset.id),
+            &BTreeSet::from_iter(pkgset.iter().map(|pkg| pkg.as_ref())),
+        )?;
 
         let (state, base_id, mut size) = rootfs.db.lock().unwrap().get_pkgset(id)?;
         assert!(base.as_ref().map(|pkgset| pkgset.id) == base_id);
@@ -74,7 +77,7 @@ impl CachedPkgSet {
 
         let cached_pkgset = Self {
             rootfs: rootfs.clone(),
-            base,
+            base: base.clone(),
             base_count,
             _lock: DirLock::shared_noblock(&pkgset_path)?,
             id,
@@ -89,7 +92,9 @@ impl CachedPkgSet {
                     let _rootfs_lock = DirLock::exclusive(rootfs.sub_path(RootFSPath::Fs))?;
                     for pkg in pkgset {
                         if !rootfs.download_native_package(pkg, logger)? {
-                            return Err(GetPkgSetError::DownloadPackageError { name: pkg.to_string() });
+                            return Err(GetPkgSetError::DownloadPackageError {
+                                name: pkg.as_ref().to_string(),
+                            });
                         }
                     }
                 }
@@ -100,7 +105,9 @@ impl CachedPkgSet {
 
                 for pkg in pkgset {
                     if !rootfs.install_native_package(cached_pkgset.base.as_deref(), &pkgset_path, &workdir_path, pkg, logger)? {
-                        return Err(GetPkgSetError::InstallPackageError { name: pkg.to_string() });
+                        return Err(GetPkgSetError::InstallPackageError {
+                            name: pkg.as_ref().to_string(),
+                        });
                     }
                 }
 

@@ -167,6 +167,7 @@ dependencies = [
  "chariot_config",
  "chariot_core",
  "chariot_rootfs",
+ "chariot_runtime",
  "chariot_util",
  "clap",
  "clap_complete",

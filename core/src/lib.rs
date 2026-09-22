@@ -12,8 +12,7 @@ use crate::{
 
 pub mod buildcache;
 pub mod config;
-pub mod dependencies;
-mod execenv;
+pub mod execenv;
 pub mod ledger;
 pub mod package;
 pub mod source;

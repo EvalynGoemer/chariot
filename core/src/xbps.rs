@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use chariot_rootfs::RootFSOverlay;
+use chariot_rootfs::{CachedPkgSet, RootFSOverlay};
 use chariot_runtime::{Mount, MountKind, RuntimeError};
 use chariot_util::fs::FileSystemError;
 use thiserror::Error;
@@ -178,6 +178,7 @@ pub fn package_create(
 
 pub fn package_install(
     ctx: &CoreContext,
+    pkgset: Option<&CachedPkgSet>,
     name: &str,
     version: &str,
     revision: usize,
@@ -257,7 +258,7 @@ pub fn package_install(
             )
             .as_str(),
         ],
-        None,
+        pkgset,
         rootfs_overlay,
     )?;
 

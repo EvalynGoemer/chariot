@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     hash::{Hash, Hasher},
     io::Write,
     path::{Path, PathBuf},
@@ -9,9 +9,40 @@ use std::{
 use chariot_rootfs::{CachedPkgSet, RootFSOverlay};
 use chariot_runtime::{Mount, MountKind, Overlay, RuntimeError};
 use chariot_util::{fs::FileSystemError, hash::hash_directory};
+use thiserror::Error;
 use xxhash_rust::xxh3::Xxh3;
 
-use crate::{CoreContext, store::StoreEntry, workdir::WorkDirectory};
+use crate::{
+    CoreContext, HOST_ARCH,
+    config::{
+        package::{Package, PackagePlatform},
+        source::Source,
+    },
+    package::{ProcessPackageError, resolve_package_runtime_dependencies},
+    source::{SourceFetchError, fetch_source},
+    store::StoreEntry,
+    workdir::WorkDirectory,
+    xbps::{XBPSPackageInstallError, package_install},
+};
+
+#[derive(Debug, Error)]
+pub enum CreateExecEnvError {
+    #[error(transparent)]
+    FileSystem(#[from] FileSystemError),
+
+    #[error(transparent)]
+    ProcessPackage(#[from] ProcessPackageError),
+
+    #[error("Failed to fetch source `{}`", name)]
+    FetchSource { name: String, source: SourceFetchError },
+
+    #[error("Failed to install {} package `{}`", platform.to_string(), name)]
+    PackageInstall {
+        platform: PackagePlatform,
+        name: String,
+        source: XBPSPackageInstallError,
+    },
+}
 
 pub struct ExecEnv<'a> {
     pub ctx: &'a CoreContext,
@@ -22,6 +53,87 @@ pub struct ExecEnv<'a> {
 }
 
 impl<'a> ExecEnv<'a> {
+    pub fn create(
+        ctx: &'a CoreContext,
+        logger: &mut dyn Write,
+        pkgset: Option<Arc<CachedPkgSet>>,
+        sources: &BTreeMap<String, Arc<Source>>,
+        packages: &Vec<Arc<Package>>,
+        tools: &Vec<Arc<Package>>,
+    ) -> Result<ExecEnv<'a>, CreateExecEnvError> {
+        let mut cached_source_deps = HashMap::new();
+        for (name, source) in sources {
+            cached_source_deps.insert(
+                name.clone(),
+                fetch_source(ctx, logger, source).map_err(|err| CreateExecEnvError::FetchSource {
+                    name: name.clone(),
+                    source: err,
+                })?,
+            );
+        }
+
+        let sysroot = WorkDirectory::create(&ctx.workdir_parent)?;
+        for pkg in packages {
+            assert!(pkg.platform == PackagePlatform::Target);
+            let entries = resolve_package_runtime_dependencies(ctx, logger, pkg)?;
+            package_install(
+                ctx,
+                None,
+                &pkg.name,
+                &pkg.version,
+                pkg.revision,
+                &pkg.global_env.target_arch,
+                entries.iter().map(|entry| entry.path()).collect(),
+                &sysroot.path(),
+                false,
+                false,
+                logger,
+            )
+            .map_err(|err| CreateExecEnvError::PackageInstall {
+                platform: PackagePlatform::Target,
+                name: pkg.name.clone(),
+                source: err,
+            })?;
+        }
+
+        let tool_overlay = if tools.len() == 0 {
+            None
+        } else {
+            let tool_overlay_workdir = WorkDirectory::create(&ctx.workdir_parent)?;
+            for tool in tools {
+                assert!(tool.platform == PackagePlatform::Host);
+                let entries = resolve_package_runtime_dependencies(ctx, logger, tool)?;
+                package_install(
+                    ctx,
+                    pkgset.as_deref(),
+                    &tool.name,
+                    &tool.version,
+                    tool.revision,
+                    HOST_ARCH,
+                    entries.iter().map(|entry| entry.path()).collect(),
+                    &tool_overlay_workdir.path(),
+                    true,
+                    false,
+                    logger,
+                )
+                .map_err(|err| CreateExecEnvError::PackageInstall {
+                    platform: PackagePlatform::Host,
+                    name: tool.name.clone(),
+                    source: err,
+                })?;
+            }
+            Some(tool_overlay_workdir)
+        };
+
+        Ok(Self {
+            ctx,
+            pkgset,
+            sources: cached_source_deps,
+            sysroot,
+            tool_overlay,
+        })
+    }
+
     pub fn compute_deps_hash(&self) -> Result<u128, FileSystemError> {
         let mut hasher = Xxh3::new();
 
