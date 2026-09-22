@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
+    fmt,
     fs::read_to_string,
     path::{Path, PathBuf},
     sync::Arc,
@@ -16,6 +17,47 @@ use mlua::{Error, ErrorContext, Lua, LuaOptions, StdLib, Table, UserData, Value}
 pub const EMBEDDED_LUA_FILE_META: &str = include_str!("./lua/meta.lua");
 pub const EMBEDDED_LUA_FILE_BUILTINS: &str = include_str!("./lua/builtins.lua");
 pub const EMBEDDED_LUA_FILE_HELPERS: &str = include_str!("./lua/helpers.lua");
+
+#[derive(Debug)]
+pub struct LuaConfigError {
+    cause: Error,
+    traceback: Option<String>,
+}
+
+impl fmt::Display for LuaConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.cause)?;
+
+        if let Some(traceback) = &self.traceback {
+            write!(f, "\nraised from Lua config:")?;
+            for line in traceback.trim_start_matches("stack traceback:").trim().lines() {
+                write!(f, "\n  {}", line.trim())?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl std::error::Error for LuaConfigError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.cause.source()
+    }
+}
+
+impl From<Error> for LuaConfigError {
+    fn from(err: Error) -> Self {
+        let mut cause = err;
+        let mut traceback = None;
+
+        while let Error::CallbackError { cause: inner, traceback: tb } = cause {
+            traceback = Some(tb);
+            cause = (*inner).clone();
+        }
+
+        LuaConfigError { cause, traceback }
+    }
+}
 
 #[derive(Debug)]
 struct ChariotAppData {
@@ -61,7 +103,8 @@ pub fn eval_lua_config(
     path: impl AsRef<Path>,
     global_environment: Arc<GlobalEnvironment>,
     options: HashMap<String, String>,
-) -> Result<Config, mlua::Error> {
+    local_source_storage: impl AsRef<Path>,
+) -> Result<Config, LuaConfigError> {
     let lua = Lua::new_with(StdLib::MATH | StdLib::STRING | StdLib::TABLE | StdLib::PACKAGE, LuaOptions::new())?;
 
     lua.set_app_data(ChariotAppData {
