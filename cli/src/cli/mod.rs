@@ -27,7 +27,7 @@ use chariot_core::{
     workdir::WorkDirectoryParent,
     xbps::package_install,
 };
-use chariot_rootfs::{CachedPkgSet, DEFAULT_MANIFESTS_URL, ManifestFetchSpec, RootFS, StderrTarget};
+use chariot_rootfs::{CachedPkgSet, DEFAULT_MANIFESTS_URL, ManifestFetchSpec, PkgSetState, RootFS, StderrTarget};
 use chariot_runtime::{Mount, MountKind};
 use chariot_util::{
     fs::{force_rm, make_path},
@@ -61,6 +61,8 @@ const CACHE_FILENAME_GITIGNORE: &str = ".gitignore";
 
 const ARG_CACHE_HELP: &str = "path to chariot cache";
 const ARG_CACHE_ENV: &str = "CHARIOT_CACHE_PATH";
+const ARG_ROOTFS_HELP: &str = "path to chariot rootfs";
+const ARG_ROOTFS_ENV: &str = "CHARIOT_ROOTFS_PATH";
 const ARG_BASECONFIG_HELP: &str = "path to chariot base config";
 const ARG_BASECONFIG_ENV: &str = "CHARIOT_BASE_CONFIG_PATH";
 
@@ -84,6 +86,9 @@ enum MainCommand {
 
     #[command(about = "cache support commands")]
     Cache(CacheOptions),
+
+    #[command(about = "rootfs support commands")]
+    Rootfs(RootFSOptions),
 
     #[command(about = "execute a command inside provided environment")]
     Exec(ExecOptions),
@@ -113,6 +118,35 @@ enum CacheCommand {
     ListLedger,
 }
 
+#[derive(Args)]
+struct RootFSOptions {
+    #[arg(long, env = ARG_ROOTFS_ENV, help = ARG_ROOTFS_HELP, default_value = DEFAULT_ROOTFS_PATH)]
+    rootfs: PathBuf,
+
+    #[command(subcommand)]
+    command: RootFSCommand,
+}
+
+#[derive(Subcommand)]
+enum RootFSCommand {
+    Init {
+        #[arg(long, default_value = DEFAULT_MANIFESTS_URL)]
+        url: String,
+        version: String,
+        hash: String,
+    },
+    Status,
+    #[command(subcommand)]
+    Pkgset(PkgsetCommand),
+    Purge,
+}
+
+#[derive(Subcommand)]
+enum PkgsetCommand {
+    List,
+    Cache { packages: Vec<String> },
+}
+
 #[derive(Subcommand)]
 enum SupportCommand {
     #[command(about = "generate lua lsp configuration")]
@@ -130,7 +164,7 @@ struct CommonBuildOptions {
     #[arg(long, env = ARG_CACHE_ENV, help = ARG_CACHE_HELP, default_value = DEFAULT_CACHE_PATH)]
     cache: PathBuf,
 
-    #[arg(long, env = "CHARIOT_ROOTFS_PATH", help = "path to chariot rootfs", default_value = DEFAULT_ROOTFS_PATH)]
+    #[arg(long, env = ARG_ROOTFS_ENV, help = ARG_ROOTFS_HELP, default_value = DEFAULT_ROOTFS_PATH)]
     rootfs: PathBuf,
 
     #[arg(long, env = ARG_BASECONFIG_ENV, help = ARG_BASECONFIG_HELP, default_value = DEFAULT_BASE_CONFIG_PATH)]
@@ -268,6 +302,20 @@ fn parse_mount(str: &str) -> Result<(String, String, bool, bool), String> {
         None => Err(format!("`{}` is not a valid mount", str)),
         Some((from, to)) => Ok((from.to_string(), to.to_string(), is_read_only, is_file)),
     }
+}
+
+fn format_size(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = UNITS[0];
+    for &u in &UNITS[1..] {
+        if value < 1024.0 {
+            break;
+        }
+        value /= 1024.0;
+        unit = u;
+    }
+    if unit == "B" { format!("{bytes}B") } else { format!("{value:.1}{unit}") }
 }
 
 fn with_state<T>(state_path: &Path, f: impl FnOnce(&mut State) -> Result<T>) -> Result<T> {
@@ -757,6 +805,68 @@ pub fn run_cli() -> Result<()> {
                 }
             }
         },
+        MainCommand::Rootfs(RootFSOptions {
+            rootfs: rootfs_path,
+            command,
+        }) => {
+            if let RootFSCommand::Init { url, version, hash } = command {
+                let spec = ManifestFetchSpec { url, version, hash };
+                RootFS::init(&rootfs_path, &spec, &mut stdout())?;
+                info!("rootfs initialized at {}", rootfs_path.display());
+                return Ok(());
+            }
+
+            let rootfs = match RootFS::get(&rootfs_path)? {
+                Some(r) => r,
+                None => bail!("no intact rootfs found at {}", rootfs_path.display()),
+            };
+
+            let rootfs = Arc::new(rootfs);
+
+            match command {
+                RootFSCommand::Init { .. } => {}
+                RootFSCommand::Status => {
+                    let spec = rootfs.get_manifest_spec();
+                    info!("path:    {}", rootfs_path.display());
+                    info!("url:     {}", spec.url);
+                    info!("version: {}", spec.version);
+                    info!("hash:    {}", spec.hash);
+                }
+                RootFSCommand::Pkgset(PkgsetCommand::List) => {
+                    let pkgsets = rootfs.list_pkgsets()?;
+                    if pkgsets.is_empty() {
+                        info!("no cached package sets");
+                        return Ok(());
+                    }
+                    info!("{:<6} {:<12} {:<6} {:<6} {:<12} packages", "id", "state", "base", "depth", "size");
+                    info!("{}", "-".repeat(60));
+                    for ps in pkgsets {
+                        let state = match ps.state {
+                            PkgSetState::Unknown => "unknown",
+                            PkgSetState::Cached => "cached",
+                            PkgSetState::Deduplicated => "deduped",
+                        };
+                        info!(
+                            "{:<6} {:<12} {:<6} {:<6} {:<12} {}",
+                            ps.id,
+                            state,
+                            ps.base.map(|id| id.to_string()).unwrap_or(String::new()),
+                            ps.base_depth,
+                            format_size(ps.size),
+                            ps.packages.iter().map(|str| str.as_ref()).collect::<Vec<_>>().join(", "),
+                        );
+                    }
+                }
+                RootFSCommand::Pkgset(PkgsetCommand::Cache { packages }) => {
+                    CachedPkgSet::get(&rootfs, &None, &BTreeSet::from_iter(packages.iter()), &mut stdout())
+                        .context("failed to get cached package set")?;
+                }
+                RootFSCommand::Purge => {
+                    let (total, removed, in_use) = rootfs.prune_pkgsets(|_| true)?;
+                    info!("purged {removed}/{total} package sets ({in_use} in use, skipped)");
+                }
+            }
+        }
         MainCommand::Support { command } => match command {
             SupportCommand::SetupLSP => setup_lua_lsp()?,
             SupportCommand::Completions { shell } => generate(shell, &mut ChariotOptions::command(), "chariot".to_string(), &mut io::stdout()),

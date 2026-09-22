@@ -226,18 +226,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "chariot_rootfs_cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chariot_rootfs",
- "clap",
- "colored",
- "log",
- "nix",
-]
-
-[[package]]
 name = "chariot_runtime"
 version = "0.1.0"
 dependencies = [
