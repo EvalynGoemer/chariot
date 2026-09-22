@@ -82,17 +82,35 @@ enum MainCommand {
         command: SupportCommand,
     },
 
-    #[command(about = "store support commands")]
-    Store(StoreOptions),
-
-    #[command(about = "ledger support commands")]
-    Ledger(LedgerOptions),
+    #[command(about = "cache support commands")]
+    Cache(CacheOptions),
 
     #[command(about = "execute a command inside provided environment")]
     Exec(ExecOptions),
 
     #[command(about = "install package")]
     Install(InstallOptions),
+
+    #[command(about = "garbage collect")]
+    Gc(GarbageCollectionOptions),
+}
+
+#[derive(Args)]
+struct CacheOptions {
+    #[arg(long, env = ARG_CACHE_ENV, help = ARG_CACHE_HELP,  default_value = DEFAULT_CACHE_PATH)]
+    cache: PathBuf,
+
+    #[command(subcommand)]
+    command: CacheCommand,
+}
+
+#[derive(Subcommand)]
+enum CacheCommand {
+    #[command(about = "deletes all store and ledger entries")]
+    Purge,
+
+    #[command(about = "lists all entries in the ledger")]
+    ListLedger,
 }
 
 #[derive(Subcommand)]
@@ -105,42 +123,6 @@ enum SupportCommand {
         #[arg(help = "shell to generate completions for", value_parser = value_parser!(Shell))]
         shell: Shell,
     },
-}
-
-#[derive(Args)]
-struct StoreOptions {
-    #[arg(long, env = ARG_CACHE_ENV, help = ARG_CACHE_HELP,  default_value = DEFAULT_CACHE_PATH)]
-    cache: PathBuf,
-
-    #[arg(long, env = ARG_BASECONFIG_ENV, help = ARG_BASECONFIG_HELP,  default_value = DEFAULT_BASE_CONFIG_PATH)]
-    base_config: PathBuf,
-
-    #[command(subcommand)]
-    command: StoreCommand,
-}
-
-#[derive(Subcommand)]
-enum StoreCommand {
-    #[command(about = "evaluate configuration for all known profiles and prunes dangling store entries")]
-    Prune,
-
-    #[command(about = "deletes all store entries")]
-    Purge,
-}
-
-#[derive(Args)]
-struct LedgerOptions {
-    #[arg(long, env = ARG_CACHE_ENV, help = ARG_CACHE_HELP,  default_value = DEFAULT_CACHE_PATH)]
-    cache: PathBuf,
-
-    #[command(subcommand)]
-    command: LedgerCommand,
-}
-
-#[derive(Subcommand)]
-enum LedgerCommand {
-    #[command(about = "lists all entries in the ledger")]
-    List,
 }
 
 #[derive(Args)]
@@ -230,6 +212,15 @@ struct InstallOptions {
 
     #[arg(required = true, help = "package install destination")]
     dest: String,
+}
+
+#[derive(Args)]
+struct GarbageCollectionOptions {
+    #[arg(long, env = ARG_CACHE_ENV, help = ARG_CACHE_HELP,  default_value = DEFAULT_CACHE_PATH)]
+    cache: PathBuf,
+
+    #[arg(long, env = ARG_BASECONFIG_ENV, help = ARG_BASECONFIG_HELP,  default_value = DEFAULT_BASE_CONFIG_PATH)]
+    base_config: PathBuf,
 }
 
 #[derive(Serialize, Deserialize, PartialEq)]
@@ -682,10 +673,9 @@ pub fn run_cli() -> Result<()> {
                 script.command(),
             )?;
         }
-        MainCommand::Store(StoreOptions {
+        MainCommand::Gc(GarbageCollectionOptions {
             cache: cache_path,
             base_config: base_config_path,
-            command: store_command,
         }) => {
             let store = Store::get(cache_path.join(CACHE_SUBDIR_STORE)).context("Failed to get store")?;
             let ledger = Ledger::get(cache_path.join(CACHE_FILENAME_LEDGER)).context("Failed to get ledger")?;
@@ -693,93 +683,84 @@ pub fn run_cli() -> Result<()> {
             let local_sources_path = cache_path.join(CACHE_SUBDIR_LOCAL_SOURCES);
             force_rm(&local_sources_path)?;
 
-            match store_command {
-                StoreCommand::Prune => {
-                    let base_config = read_base_config(&base_config_path).context("Failed to read base config")?;
-                    let target_prefix = base_config.target_prefix.unwrap_or(String::from(DEFAULT_TARGET_PREFIX));
+            let base_config_path = base_config_path
+                .canonicalize()
+                .context("Failed to canonicalize (find absolute path of) base config")?;
 
-                    with_state(&cache_path.join(CACHE_FILENAME_STATE), |state| {
-                        for (idx, input_state) in state.known_input_states.iter().enumerate() {
-                            let global_environment = Arc::new(GlobalEnvironment {
-                                global_environment_variables: BTreeMap::new(),
-                                rootfs_manifest_hash: base_config.rootfs.hash.clone(),
-                                target_prefix: target_prefix.clone(),
-                                target_arch: input_state.arch.clone(),
-                            });
+            let base_config = read_base_config(&base_config_path).context("Failed to read base config")?;
+            let target_prefix = base_config.target_prefix.unwrap_or(String::from(DEFAULT_TARGET_PREFIX));
 
-                            let lua_config_path = base_config.lua_root.clone().unwrap_or(PathBuf::from(DEFAULT_LUA_CONFIG_PATH));
-                            let config = eval_lua_config(&lua_config_path, global_environment, input_state.options.clone(), &local_sources_path)
-                                .context("Failed to evaluate lua config")?;
+            with_state(&cache_path.join(CACHE_FILENAME_STATE), |state| {
+                for (idx, input_state) in state.known_input_states.iter().enumerate() {
+                    let global_environment = Arc::new(GlobalEnvironment {
+                        global_environment_variables: BTreeMap::new(),
+                        rootfs_manifest_hash: base_config.rootfs.hash.clone(),
+                        target_prefix: target_prefix.clone(),
+                        target_arch: input_state.arch.clone(),
+                    });
 
-                            state.cached_hashes.insert(
-                                idx,
-                                collect_all_hashes(&config)
-                                    .into_iter()
-                                    .map(|(cat, hash)| (cat.to_string(), hash))
-                                    .collect(),
-                            );
-                        }
+                    let lua_config_path = base_config.lua_root.clone().unwrap_or(PathBuf::from(DEFAULT_LUA_CONFIG_PATH));
+                    let config = eval_lua_config(&lua_config_path, global_environment, input_state.options.clone(), &local_sources_path)
+                        .context("Failed to evaluate lua config")?;
 
-                        let live_recipe_hashes = state
-                            .cached_hashes
-                            .iter()
-                            .map(|(_, hashes)| hashes.into_iter())
-                            .flatten()
-                            .map(|(cat, hash)| (cat.as_str(), *hash))
-                            .collect::<HashSet<_>>();
-
-                        store.prune_store(resolve_effective_hashes(&ledger, live_recipe_hashes.iter().copied())?)?;
-                        ledger.prune(live_recipe_hashes)?;
-
-                        Ok(())
-                    })?;
+                    state.cached_hashes.insert(
+                        idx,
+                        collect_all_hashes(&config)
+                            .into_iter()
+                            .map(|(cat, hash)| (cat.to_string(), hash))
+                            .collect(),
+                    );
                 }
-                StoreCommand::Purge => {
-                    store.prune_store(HashSet::new()).context("Failed to purge store")?;
-                    ledger.prune(HashSet::new()).context("Failed to purge ledger")?;
-                }
-            }
+
+                let live_recipe_hashes = state
+                    .cached_hashes
+                    .iter()
+                    .map(|(_, hashes)| hashes.into_iter())
+                    .flatten()
+                    .map(|(cat, hash)| (cat.as_str(), *hash))
+                    .collect::<HashSet<_>>();
+
+                store.prune_store(resolve_effective_hashes(&ledger, live_recipe_hashes.iter().copied())?)?;
+                ledger.prune(live_recipe_hashes)?;
+
+                Ok(())
+            })?;
         }
-        MainCommand::Ledger(LedgerOptions {
-            cache: cache_path,
-            command: ledger_command,
-        }) => {
-            let ledger = Ledger::get(cache_path.join(CACHE_FILENAME_LEDGER)).context("Failed to get ledger")?;
+        MainCommand::Cache(CacheOptions { cache: cache_path, command }) => match command {
+            CacheCommand::Purge => {
+                let store = Store::get(cache_path.join(CACHE_SUBDIR_STORE)).context("Failed to get store")?;
+                let ledger = Ledger::get(cache_path.join(CACHE_FILENAME_LEDGER)).context("Failed to get ledger")?;
 
-            match ledger_command {
-                LedgerCommand::List => {
-                    let records = ledger.list().context("Failed to list ledger records")?;
-                    let max_category_length = records.iter().map(|(cat, ..)| cat.len()).max().unwrap_or(0).max(8);
+                store.prune_store(HashSet::new()).context("Failed to purge store")?;
+                ledger.prune(HashSet::new()).context("Failed to purge ledger")?;
+            }
+            CacheCommand::ListLedger => {
+                let ledger = Ledger::get(cache_path.join(CACHE_FILENAME_LEDGER)).context("Failed to get ledger")?;
+                let records = ledger.list().context("Failed to list ledger records")?;
+                let max_category_length = records.iter().map(|(cat, ..)| cat.len()).max().unwrap_or(0).max(8);
+                info!(
+                    "{:<cat_width$} {:<32} {:<32}",
+                    "category",
+                    "input_hash",
+                    "effective_hash",
+                    cat_width = max_category_length
+                );
+                info!("{}", "-".repeat(max_category_length + 66));
+                for (category, hash, effective_hash) in records {
                     info!(
-                        "{:<cat_width$} {:<32} {:<32}",
-                        "category",
-                        "input_hash",
-                        "effective_hash",
+                        "{:<cat_width$} {:<32x} {:<32x}",
+                        category,
+                        hash,
+                        effective_hash,
                         cat_width = max_category_length
                     );
-                    info!("{}", "-".repeat(max_category_length + 66));
-                    for (category, hash, effective_hash) in records {
-                        info!(
-                            "{:<cat_width$} {:<32x} {:<32x}",
-                            category,
-                            hash,
-                            effective_hash,
-                            cat_width = max_category_length
-                        );
-                    }
                 }
             }
-        }
-        MainCommand::Support {
-            command: SupportCommand::SetupLSP,
-        } => {
-            setup_lua_lsp()?;
-        }
-        MainCommand::Support {
-            command: SupportCommand::Completions { shell },
-        } => {
-            generate(shell, &mut ChariotOptions::command(), "chariot".to_string(), &mut io::stdout());
-        }
+        },
+        MainCommand::Support { command } => match command {
+            SupportCommand::SetupLSP => setup_lua_lsp()?,
+            SupportCommand::Completions { shell } => generate(shell, &mut ChariotOptions::command(), "chariot".to_string(), &mut io::stdout()),
+        },
     };
 
     Ok(())
