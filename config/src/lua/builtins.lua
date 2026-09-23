@@ -27,6 +27,21 @@ function string.split(str, separator)
     return t
 end
 
+--- Merge two tables. On collision table2 has priority.
+--- @param table1 table
+--- @param table2 table
+--- @return table
+function table.merge(table1, table2)
+    local merged = {}
+    for k, v in pairs(table1) do
+        merged[k] = v
+    end
+    for k, v in pairs(table2) do
+        merged[k] = v
+    end
+    return merged
+end
+
 --- Print table keys and values.
 --- @param table table
 function table.print(table)
