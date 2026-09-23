@@ -390,6 +390,8 @@ impl RootFS {
             base = pkgset.base.as_deref();
         }
 
+        lower_directories.reverse();
+
         let exit_code = runtime_execute(
             self.sub_path(RootFSPath::Fs),
             true,
@@ -545,6 +547,8 @@ impl RootFS {
         }
 
         if pkgset.is_some() || rootfs_overlay.is_some() {
+            lower_directories.reverse();
+
             late_mounts.push(Mount {
                 dest: PathBuf::new(),
                 kind: MountKind::OverlayFS(Overlay {
