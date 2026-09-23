@@ -10,7 +10,7 @@ use crate::{
     CoreContext,
     buildcache::BuildDirectory,
     config::package::Package,
-    execenv::{CreateExecEnvError, ExecEnv},
+    execenv::{CreateExecEnvError, EXECENV_SOURCES_DIRECTORY_PATH, ExecEnv},
     source::SourceFetchError,
     store::StoreEntry,
     workdir::WorkDirectory,
@@ -173,6 +173,17 @@ fn get_package_install(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
         },
     };
 
+    let source_dir = if package.dependencies.sources.iter().any(|(k, _)| k == &package.name) {
+        Some(
+            PathBuf::from(EXECENV_SOURCES_DIRECTORY_PATH)
+                .join(&package.name)
+                .to_string_lossy()
+                .to_string(),
+        )
+    } else {
+        None
+    };
+
     let base_env = package
         .global_env
         .global_environment_variables
@@ -184,6 +195,10 @@ fn get_package_install(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
             ("PREFIX", package.get_prefix()),
             ("ARCH", package.get_arch()),
         ])
+        .chain(match &source_dir {
+            Some(dir) => Some(("SOURCE_DIR", dir.as_str())),
+            None => None,
+        })
         .collect();
 
     if let Some(configure) = &package.configure {

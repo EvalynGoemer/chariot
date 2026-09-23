@@ -25,6 +25,9 @@ use crate::{
     xbps::{XBPSPackageInstallError, package_install},
 };
 
+pub const EXECENV_SOURCES_DIRECTORY_PATH: &str = "/chariot/sources";
+pub const EXECENV_SYSROOT_DIRECTORY_PATH: &str = "/chariot/sysroot";
+
 #[derive(Debug, Error)]
 pub enum CreateExecEnvError {
     #[error(transparent)]
@@ -173,7 +176,7 @@ impl<'a> ExecEnv<'a> {
             .sources
             .iter()
             .map(|(name, store_entries)| Mount {
-                dest: PathBuf::from("/chariot/sources").join(name),
+                dest: PathBuf::from(EXECENV_SOURCES_DIRECTORY_PATH).join(name),
                 kind: match store_entries.len() {
                     1 => MountKind::Bind {
                         from: store_entries[0].path(),
@@ -189,7 +192,7 @@ impl<'a> ExecEnv<'a> {
             .collect::<Vec<_>>();
 
         let sysroot_mount = Mount {
-            dest: PathBuf::from("/chariot/sysroot"),
+            dest: PathBuf::from(EXECENV_SYSROOT_DIRECTORY_PATH),
             kind: MountKind::Bind {
                 from: self.sysroot.path(),
                 read_only: false,
@@ -201,8 +204,8 @@ impl<'a> ExecEnv<'a> {
 
         let base_mounts = source_mounts.into_iter().chain([sysroot_mount]).collect::<Vec<_>>();
         let base_env = HashMap::from([
-            ("SOURCES_DIR", "/chariot/sources"),
-            ("SYSROOT_DIR", "/chariot/sysroot"),
+            ("SOURCES_DIR", EXECENV_SOURCES_DIRECTORY_PATH),
+            ("SYSROOT_DIR", EXECENV_SYSROOT_DIRECTORY_PATH),
             ("PARALLELISM", &parallelism_string),
         ]);
 
