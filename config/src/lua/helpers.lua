@@ -96,15 +96,13 @@ function Source(tbl)
         table.insert(patches, chariot.read_file(patch))
     end
 
-    local deps = tbl["dependencies"]
     local script = tbl["prepare"]
+    local deps = tbl["dependencies"]
 
     local prepare = nil
-    if deps ~= nil and script ~= nil then
-        prepare = { dependencies = deps, script = script }
+    if script ~= nil then
+        prepare = { dependencies = deps or {}, script = script }
     elseif deps ~= nil then
-        warn("prepare skipped, `script` is defined but `dependencies` is not")
-    elseif script ~= nil then
         warn("prepare skipped, `dependencies` is defined but `script` is not")
     end
 
