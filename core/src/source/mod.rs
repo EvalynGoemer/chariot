@@ -160,7 +160,7 @@ pub fn fetch_source(ctx: &CoreContext, logger: &mut dyn Write, source: &Source) 
                             vec![&Mount {
                                 dest: PathBuf::from("/chariot/source"),
                                 kind: OverlayFS(Overlay {
-                                    lower_directories: store_entries.iter().map(|entry| entry.path()).collect(),
+                                    lower_directories: store_entries.iter().map(|entry| entry.path()).rev().collect(),
                                     upper_directory: Some(OverlayUpperDirectory {
                                         upper_directory: work_directory.path(),
                                         work_directory: overlay_work_directory.path(),
