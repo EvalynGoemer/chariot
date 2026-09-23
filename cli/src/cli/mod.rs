@@ -30,7 +30,7 @@ use chariot_core::{
 use chariot_rootfs::{CachedPkgSet, DEFAULT_MANIFESTS_URL, ManifestFetchSpec, PkgSetState, RootFS, StderrTarget};
 use chariot_runtime::{Mount, MountKind};
 use chariot_util::{
-    fs::{force_rm, make_path},
+    fs::{force_rm, join_soft, make_path},
     lock::{FileLockKind, open_file_locked},
 };
 use clap::{Args, CommandFactory, Parser, Subcommand, value_parser};
@@ -399,9 +399,10 @@ fn build_prepare(build_opts: CommonBuildOptions, local_config: &CliConfig) -> Re
             target_arch: build_opts.arch,
         });
 
-        let lua_config_path = config_dir.join(base_config.lua_root.clone().unwrap_or(PathBuf::from(DEFAULT_LUA_CONFIG_PATH)));
+        let lua_config_path = join_soft(config_dir, base_config.lua_root.clone().unwrap_or(PathBuf::from(DEFAULT_LUA_CONFIG_PATH)));
         let config = eval_lua_config(
             &lua_config_path,
+            config_dir,
             global_environment,
             options,
             local_sources_path,
@@ -744,6 +745,8 @@ pub fn run_cli() -> Result<()> {
                     .context("Failed to canonicalize (find absolute path of) base config")?;
 
                 let base_config = read_base_config(&base_config_path).context("Failed to read base config")?;
+                let config_dir = base_config_path.parent().context("Failed to resolve directory of base config")?;
+
                 let target_prefix = base_config.target_prefix.unwrap_or(String::from(DEFAULT_TARGET_PREFIX));
 
                 with_state(&cache_path.join(CACHE_FILENAME_STATE), |state| {
@@ -756,9 +759,10 @@ pub fn run_cli() -> Result<()> {
                             target_arch: input_state.arch.clone(),
                         });
 
-                        let lua_config_path = base_config.lua_root.clone().unwrap_or(PathBuf::from(DEFAULT_LUA_CONFIG_PATH));
+                        let lua_config_path = join_soft(config_dir, base_config.lua_root.clone().unwrap_or(PathBuf::from(DEFAULT_LUA_CONFIG_PATH)));
                         let config = eval_lua_config(
                             &lua_config_path,
+                            config_dir,
                             global_environment,
                             input_state.options.clone(),
                             &local_sources_path,

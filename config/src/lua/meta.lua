@@ -56,6 +56,8 @@
 chariot = {}
 
 --- Reads a file's contents from disk.
+--- **NOTE**: The path will be relative to the project root,
+--- which is the directory where the base config is.
 ---@param path string
 ---@return string
 function chariot.read_file(path) end

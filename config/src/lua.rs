@@ -13,7 +13,7 @@ use chariot_core::config::{
     source::{Archive, ArchiveCompression, ArchiveKind, GitSource, LocalSource, Source, SourceBase, SourcePrepare},
 };
 use chariot_util::{
-    fs::{FileSystemError, copy_recursive, force_rm},
+    fs::{FileSystemError, copy_recursive, force_rm, join_soft},
     hash::hash_directory,
 };
 use mlua::{Error, ErrorContext, Lua, LuaOptions, StdLib, Table, UserData, Value};
@@ -138,6 +138,7 @@ fn make_local_source(local_source_storage: &Path, from_path: &Path) -> Result<Lo
 
 pub fn eval_lua_config(
     path: impl AsRef<Path>,
+    project_root: impl AsRef<Path>,
     global_environment: Arc<GlobalEnvironment>,
     options: HashMap<String, String>,
     local_source_storage: impl AsRef<Path>,
@@ -161,10 +162,13 @@ pub fn eval_lua_config(
     chariot_table.set("options", options_table)?;
     chariot_table.set("target_prefix", lua.create_string(&global_environment.target_prefix)?)?;
     chariot_table.set("target_arch", lua.create_string(&global_environment.target_arch)?)?;
-    chariot_table.set(
-        "read_file",
-        lua.create_function(|_, path: PathBuf| Ok(read_to_string(path).map_err(|err| Error::ExternalError(Arc::new(err)))?))?,
-    )?;
+    chariot_table.set("read_file", {
+        let project_root = project_root.as_ref().to_path_buf();
+        lua.create_function(move |_, path: PathBuf| {
+            let project_root_relative_path = join_soft(&project_root, &path);
+            Ok(read_to_string(project_root_relative_path).map_err(|err| Error::ExternalError(Arc::new(err)))?)
+        })?
+    })?;
     chariot_table.set("def_source", {
         let global_environment = global_environment.clone();
         let local_source_storage = local_source_storage.as_ref().to_path_buf();
