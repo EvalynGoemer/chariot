@@ -527,7 +527,7 @@ impl RootFS {
         pkgset: Option<&CachedPkgSet>,
         rootfs_overlay: Option<RootFSOverlay>,
     ) -> Result<i32, RuntimeError> {
-        let mut late_mounts = Vec::new();
+        let mut early_mounts = Vec::new();
 
         let mut lower_directories = Vec::from([self.sub_path(RootFSPath::Fs)]);
         if let Some(RootFSOverlay::ReadOnly(path)) = &rootfs_overlay {
@@ -549,7 +549,7 @@ impl RootFS {
         if pkgset.is_some() || rootfs_overlay.is_some() {
             lower_directories.reverse();
 
-            late_mounts.push(Mount {
+            early_mounts.push(Mount {
                 dest: PathBuf::new(),
                 kind: MountKind::OverlayFS(Overlay {
                     upper_directory: match rootfs_overlay {
@@ -570,7 +570,7 @@ impl RootFS {
             self.state.cached_manifest.user_uid,
             self.state.cached_manifest.user_gid,
             cwd,
-            &late_mounts.iter().collect(),
+            &early_mounts.iter().collect(),
             mounts,
             environment,
             false,
