@@ -610,7 +610,7 @@ pub fn run_cli() -> Result<()> {
                 .collect::<Result<Vec<_>, _>>()?;
 
             let mut tools = exec_options
-                .pkg
+                .tool
                 .iter()
                 .map(|name| {
                     let tool = match config
