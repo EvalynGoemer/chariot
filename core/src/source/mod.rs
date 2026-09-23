@@ -130,7 +130,8 @@ pub fn fetch_source(ctx: &CoreContext, logger: &mut dyn Write, source: &Source) 
         let prepare_store_entry = match cached_entry {
             Some(store_entry) => store_entry,
             None => {
-                let pkgset = CachedPkgSet::get(&ctx.rootfs, &ctx.root_pkgset, &prepare.dependencies.native, logger)?;
+                let root_pkgset = CachedPkgSet::get(&ctx.rootfs, &None, &prepare.global_env.global_native_packages, logger)?;
+                let pkgset = CachedPkgSet::get(&ctx.rootfs, &root_pkgset, &prepare.dependencies.native, logger)?;
                 let exec_env = ExecEnv::create(
                     ctx,
                     logger,

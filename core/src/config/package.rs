@@ -62,6 +62,7 @@ impl Package {
         CONFIG_VERSION.hash(&mut hasher);
         self.global_env.rootfs_manifest_hash.hash(&mut hasher);
         self.global_env.global_environment_variables.hash(&mut hasher);
+        self.global_env.global_native_packages.hash(&mut hasher);
         self.get_arch().hash(&mut hasher);
         self.get_prefix().hash(&mut hasher);
         self.environment_variables.hash(&mut hasher);

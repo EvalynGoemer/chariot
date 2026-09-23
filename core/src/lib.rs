@@ -34,7 +34,6 @@ pub struct CoreContext {
     pub ledger: Arc<Ledger>,
     pub build_cache: Arc<BuildCache>,
     pub workdir_parent: Arc<WorkDirectoryParent>,
-    pub root_pkgset: Option<Arc<CachedPkgSet>>,
     pub git_pkgset: Option<Arc<CachedPkgSet>>,
     pub wget_pkgset: Option<Arc<CachedPkgSet>>,
     pub sha256sum_pkgset: Option<Arc<CachedPkgSet>>,

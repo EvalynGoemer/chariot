@@ -1,4 +1,5 @@
 use std::{
+    collections::{BTreeMap, BTreeSet},
     fs::read_to_string,
     path::{Path, PathBuf},
 };
@@ -27,6 +28,10 @@ pub struct RootFSConfig {
 pub struct BaseConfig {
     pub lua_root: Option<PathBuf>,
     pub target_prefix: Option<String>,
+    #[serde(default)]
+    pub global_native_packages: BTreeSet<String>,
+    #[serde(default)]
+    pub global_environment_variables: BTreeMap<String, String>,
     pub rootfs: RootFSConfig,
 }
 

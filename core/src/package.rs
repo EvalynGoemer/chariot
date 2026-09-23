@@ -122,7 +122,8 @@ fn get_package_install(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
         return Ok(store_entry);
     }
 
-    let pkgset = CachedPkgSet::get(&ctx.rootfs, &ctx.root_pkgset, &package.dependencies.native, logger)?;
+    let root_pkgset = CachedPkgSet::get(&ctx.rootfs, &None, &package.global_env.global_native_packages, logger)?;
+    let pkgset = CachedPkgSet::get(&ctx.rootfs, &root_pkgset, &package.dependencies.native, logger)?;
     let exec_env = ExecEnv::create(
         ctx,
         logger,
@@ -186,7 +187,15 @@ fn get_package_install(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
         .collect();
 
     if let Some(configure) = &package.configure {
-        let exit_code = exec_env.exec("/chariot/build", vec![&build_mount], &base_env, false, Some(logger), StderrTarget::Merge, configure.command())?;
+        let exit_code = exec_env.exec(
+            "/chariot/build",
+            vec![&build_mount],
+            &base_env,
+            false,
+            Some(logger),
+            StderrTarget::Merge,
+            configure.command(),
+        )?;
 
         if exit_code != 0 {
             return Err(ProcessPackageError::Configure(exit_code));
@@ -194,7 +203,15 @@ fn get_package_install(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
     }
 
     if let Some(build) = &package.build {
-        let exit_code = exec_env.exec("/chariot/build", vec![&build_mount], &base_env, false, Some(logger), StderrTarget::Merge, build.command())?;
+        let exit_code = exec_env.exec(
+            "/chariot/build",
+            vec![&build_mount],
+            &base_env,
+            false,
+            Some(logger),
+            StderrTarget::Merge,
+            build.command(),
+        )?;
 
         if exit_code != 0 {
             return Err(ProcessPackageError::Build(exit_code));

@@ -392,7 +392,8 @@ fn build_prepare(build_opts: CommonBuildOptions, local_config: &CliConfig) -> Re
         let target_prefix = base_config.target_prefix.clone().unwrap_or(String::from(DEFAULT_TARGET_PREFIX));
 
         let global_environment = Arc::new(GlobalEnvironment {
-            global_environment_variables: BTreeMap::new(),
+            global_environment_variables: base_config.global_environment_variables.clone(),
+            global_native_packages: base_config.global_native_packages.clone(),
             rootfs_manifest_hash: base_config.rootfs.hash.clone(),
             target_prefix: target_prefix.clone(),
             target_arch: build_opts.arch,
@@ -516,7 +517,6 @@ fn build_prepare(build_opts: CommonBuildOptions, local_config: &CliConfig) -> Re
     let ctx = CoreContext {
         build_cache_enabled,
         parallelism: available_parallelism()?.get(),
-        root_pkgset: None,
         bsdtar_pkgset: binary_to_pkgset.remove("bsdtar").unwrap(),
         git_pkgset: binary_to_pkgset.remove("git").unwrap(),
         patch_pkgset: binary_to_pkgset.remove("patch").unwrap(),
@@ -749,7 +749,8 @@ pub fn run_cli() -> Result<()> {
                 with_state(&cache_path.join(CACHE_FILENAME_STATE), |state| {
                     for (idx, input_state) in state.known_input_states.iter().enumerate() {
                         let global_environment = Arc::new(GlobalEnvironment {
-                            global_environment_variables: BTreeMap::new(),
+                            global_environment_variables: base_config.global_environment_variables.clone(),
+                            global_native_packages: base_config.global_native_packages.clone(),
                             rootfs_manifest_hash: base_config.rootfs.hash.clone(),
                             target_prefix: target_prefix.clone(),
                             target_arch: input_state.arch.clone(),

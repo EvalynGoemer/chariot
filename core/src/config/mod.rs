@@ -11,7 +11,7 @@ pub mod source;
 
 /// Describes the config version. If the config format changes
 /// in a backwards incompatible way, this version should be bumped.
-const CONFIG_VERSION: u64 = 3;
+const CONFIG_VERSION: u64 = 4;
 
 #[derive(Debug, Default)]
 pub struct Dependencies {
@@ -25,6 +25,7 @@ pub struct Dependencies {
 pub struct GlobalEnvironment {
     pub rootfs_manifest_hash: String,
     pub global_environment_variables: BTreeMap<String, String>,
+    pub global_native_packages: BTreeSet<String>,
     pub target_arch: String,
     pub target_prefix: String,
 }

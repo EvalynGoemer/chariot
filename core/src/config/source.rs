@@ -92,6 +92,7 @@ impl Source {
         if let Some(prepare) = &self.prepare {
             prepare.global_env.rootfs_manifest_hash.hash(&mut hasher);
             prepare.global_env.global_environment_variables.hash(&mut hasher);
+            prepare.global_env.global_native_packages.hash(&mut hasher);
             prepare.environment_variables.hash(&mut hasher);
             prepare.script.hash(&mut hasher);
             prepare.dependencies.native.hash(&mut hasher);
