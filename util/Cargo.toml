@@ -6,4 +6,4 @@ authors.workspace = true
 
 [dependencies]
 nix = { workspace = true, features = ["fs"] }
-thiserror = "2.0.18"
+thiserror.workspace = true
