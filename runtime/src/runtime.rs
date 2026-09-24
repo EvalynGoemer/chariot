@@ -12,12 +12,12 @@ use std::{
 
 use nix::{
     fcntl::OFlag,
-    mount::{MsFlags, mount},
+    mount::{MntFlags, MsFlags, mount, umount2},
     poll::{PollFd, PollFlags, poll},
     sched::{CloneFlags, unshare},
     sys::wait::{WaitPidFlag, WaitStatus, waitpid},
     unistd::{
-        ForkResult, Gid, Uid, chdir, chroot, dup2_stderr, dup2_stdin, dup2_stdout, execvp, fork, getegid, geteuid, pipe2, read, setgid, setuid,
+        ForkResult, Gid, Uid, chdir, dup2_stderr, dup2_stdin, dup2_stdout, execvp, fork, getegid, geteuid, pipe2, pivot_root, read, setgid, setuid,
     },
 };
 
@@ -224,6 +224,8 @@ fn init(
         unshare(CloneFlags::CLONE_NEWNET).expect("unshare network failed");
     }
 
+    mount(None::<&str>, "/", None::<&str>, MsFlags::MS_REC | MsFlags::MS_PRIVATE, None::<&str>).expect("private mount of `/` failed");
+
     // Helpers
     let relative_rootfs_path = |path: &Path| -> PathBuf {
         let mut rootfs_relative_path = rootfs_path.as_ref().to_path_buf();
@@ -335,8 +337,10 @@ fn init(
     }
 
     // Enter rootfs
-    chroot(rootfs_path.as_ref()).expect("chroot failed");
-    chdir(cwd).expect("cwd chdir failed");
+    chdir(rootfs_path.as_ref()).expect("rootfs chdir failed");
+    pivot_root(".", ".").expect("pivot_root failed");
+    umount2(".", MntFlags::MNT_DETACH).expect("old root unmount failed");
+    chdir(&Path::new("/").join(cwd)).expect("cwd chdir failed");
 
     // Run program
     match unsafe { fork() }.expect("program fork failed") {
