@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    fs::{canonicalize, write},
+    fs::{File, canonicalize, write},
     io::{self, Cursor, ErrorKind, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -9,7 +9,7 @@ use std::{
 
 use chariot_runtime::{Mount, MountKind, Overlay, OverlayUpperDirectory, RuntimeError, runtime_execute};
 use chariot_util::{
-    fs::{FileSystemError, MergeDirectoryError, force_rm, force_rm_contents, make_path, merge_directory},
+    fs::{FileSystemError, MergeDirectoryError, force_rm, force_rm_contents, join_soft, make_path, merge_directory},
     lock::{DirLock, LockShared, block_attempted},
 };
 use reqwest::blocking::Client;
@@ -60,8 +60,8 @@ pub enum RootFSInitError {
     #[error("RootFS setup command exited with a non-zero code")]
     SetupScript,
 
-    #[error("Failed to install archive `{}`", name)]
-    ArchiveInstall { name: String, source: ArchiveInstallError },
+    #[error("Failed to install archive `{}`", url)]
+    ArchiveInstall { url: String, source: ArchiveInstallError },
 
     #[error("Invalid path `{}`", path.display())]
     InvalidPath { path: PathBuf, source: io::Error },
@@ -210,16 +210,34 @@ impl RootFS {
 
         state.write(rootfs_sub_path(&path, RootFSPath::State), false)?;
 
-        for (name, archive) in manifest.archives {
+        for directory in manifest.directories {
+            make_path(join_soft(rootfs_sub_path(&path, RootFSPath::Fs), directory))?;
+        }
+
+        for file in manifest.files {
+            let path = join_soft(rootfs_sub_path(&path, RootFSPath::Fs), file);
+            if let Some(parent_path) = path.parent() {
+                make_path(parent_path)?;
+                File::create(&path).map_err(|err| FileSystemError::CreateFile {
+                    path: path.to_path_buf(),
+                    source: err,
+                })?;
+            }
+        }
+
+        for archive in manifest.archives {
             Self::install_archive(
-                rootfs_sub_path(&path, RootFSPath::Fs),
-                rootfs_sub_path(&path, RootFSPath::ArchiveTmp),
-                archive.url,
-                archive.compression,
-                archive.hash,
-                archive.subdir,
+                &rootfs_sub_path(&path, RootFSPath::Fs),
+                &rootfs_sub_path(&path, RootFSPath::ArchiveTmp),
+                &archive.url,
+                &archive.compression,
+                &archive.hash,
+                archive.subdir.as_deref(),
             )
-            .map_err(|err| RootFSInitError::ArchiveInstall { name, source: err })?;
+            .map_err(|err| RootFSInitError::ArchiveInstall {
+                url: archive.url,
+                source: err,
+            })?;
         }
 
         let setup_command = manifest.commands.setup.replace(
@@ -297,15 +315,15 @@ impl RootFS {
     }
 
     fn install_archive(
-        dest: impl AsRef<Path>,
-        tmp_path: impl AsRef<Path>,
-        url: impl AsRef<str>,
-        compression: impl AsRef<str>,
-        hash: impl AsRef<str>,
-        subdir: Option<impl AsRef<str>>,
+        dest: &Path,
+        tmp_path: &Path,
+        url: &str,
+        compression: &str,
+        hash: &str,
+        subdir: Option<&str>,
     ) -> Result<(), ArchiveInstallError> {
         let client = Client::builder().timeout(None).connect_timeout(Duration::from_secs(30)).build()?;
-        let archive_data = client.get(url.as_ref()).send()?.error_for_status()?.bytes()?;
+        let archive_data = client.get(url).send()?.error_for_status()?.bytes()?;
         let archive_hash = {
             let mut hasher = Sha256::new();
             hasher.update(&archive_data);
@@ -314,7 +332,7 @@ impl RootFS {
 
         if archive_hash != hash.as_ref() {
             return Err(ArchiveInstallError::HashMismatch {
-                expected: hash.as_ref().to_string(),
+                expected: hash.to_string(),
                 found: archive_hash,
             });
         }
@@ -322,12 +340,12 @@ impl RootFS {
         let decompressor: &mut dyn io::Read = match compression.as_ref() {
             "xz" => &mut XzDecoder::new(Cursor::new(archive_data)),
             "zstd" => &mut zstd::Decoder::new(Cursor::new(archive_data)).map_err(|err| ArchiveInstallError::ZstdDecompression(err))?,
-            _ => return Err(ArchiveInstallError::UnknownCompression(compression.as_ref().to_string())),
+            _ => return Err(ArchiveInstallError::UnknownCompression(compression.to_string())),
         };
 
         let unpack_path = match subdir {
-            None => dest.as_ref(),
-            Some(_) => tmp_path.as_ref(),
+            None => dest,
+            Some(_) => tmp_path,
         };
 
         Archive::new(decompressor)
@@ -338,7 +356,7 @@ impl RootFS {
             })?;
 
         if let Some(subdir) = subdir {
-            let from_path = unpack_path.join(subdir.as_ref());
+            let from_path = unpack_path.join(subdir);
             merge_directory(&from_path, &dest)?;
             force_rm(unpack_path)?;
         }

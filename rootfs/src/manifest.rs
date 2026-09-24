@@ -14,7 +14,7 @@ use url::Url;
 
 /// Describes the manifest version. If the manifest format changes
 /// in a backwards incompatible way, this version should be bumped.
-pub const ROOTFS_MANIFEST_VERSION: i64 = 4;
+pub const ROOTFS_MANIFEST_VERSION: i64 = 5;
 
 const MANIFEST_URL_VERSION_PLACEHOLDER: &str = "@VERSION@";
 pub const PLACEHOLDER_ROOT_PACKAGES: &str = "@ROOT_PACKAGES@";
@@ -59,7 +59,15 @@ pub struct ManifestPackages {
 
 #[derive(Deserialize)]
 pub struct Manifest {
-    pub archives: HashMap<String, ArchiveSpec>,
+    #[serde(default)]
+    pub directories: Vec<String>,
+
+    #[serde(default)]
+    pub files: Vec<String>,
+
+    #[serde(default)]
+    pub archives: Vec<ArchiveSpec>,
+
     pub commands: ManifestCommands,
     pub ids: ManifestIDs,
     pub packages: ManifestPackages,
