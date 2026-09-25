@@ -141,8 +141,9 @@ pub fn package_create(
             format!("xbps-create --built-with chariot --architecture \"$XBPS_TARGET_ARCH\" --pkgver \"$PKG_NAME-${{PKG_VER}}_$PKG_REV\" --desc \"Package $PKG_NAME built by chariot\" --dependencies \"$PKG_RDEPS\" /chariot/xbps/package").as_str(),
         ],
         None,
-        vec![],
+        true,
         None,
+        vec![],
     )?;
 
     if exit_code != 0 {
@@ -183,8 +184,9 @@ pub fn package_create(
             format!("xbps-rindex -f -a \"$PKG_NAME-${{PKG_VER}}_$PKG_REV.$XBPS_TARGET_ARCH.xbps\"").as_str(),
         ],
         None,
-        vec![],
+        true,
         None,
+        vec![],
     )?;
 
     if exit_code != 0 {
@@ -294,8 +296,9 @@ pub fn package_install(
             .as_str(),
         ],
         pkgset,
-        vec![],
+        overlay.is_none(),
         overlay,
+        vec![],
     )?;
 
     if exit_code != 0 {

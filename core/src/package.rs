@@ -131,6 +131,8 @@ fn get_package_install(ctx: &CoreContext, logger: &mut dyn Write, package: &Pack
         &package.dependencies.sources,
         &package.dependencies.packages,
         &package.dependencies.tools,
+        true,
+        None,
     )
     .map_err(|err| Box::new(err))?;
 

@@ -24,11 +24,11 @@ use chariot_core::{
     package::resolve_package_runtime_dependencies,
     resolve_effective_hashes,
     store::Store,
-    workdir::WorkDirectoryParent,
+    workdir::{WorkDirectory, WorkDirectoryParent},
     xbps::package_install,
 };
 use chariot_rootfs::{CachedPkgSet, DEFAULT_MANIFESTS_URL, ManifestFetchSpec, PkgSetState, RootFS, StderrTarget};
-use chariot_runtime::{Mount, MountKind};
+use chariot_runtime::{Mount, MountKind, OverlayUpperDirectory};
 use chariot_util::{
     fs::{force_rm, join_soft, make_path},
     lock::{FileLockKind, open_file_locked},
@@ -664,6 +664,16 @@ pub fn run_cli() -> Result<()> {
                 None => &BTreeMap::new(),
             };
 
+            let mountpoint_overlay_workdir = WorkDirectory::create(&ctx.workdir_parent)?;
+            let mountpoint_overlay_overlay_path = mountpoint_overlay_workdir.path().join("mountpoint_overlay");
+            let mountpoint_overlay_work_path = mountpoint_overlay_workdir.path().join("work");
+            make_path(&mountpoint_overlay_overlay_path)?;
+            make_path(&mountpoint_overlay_work_path)?;
+            let mountpoint_overlay = OverlayUpperDirectory {
+                upper_directory: mountpoint_overlay_overlay_path,
+                work_directory: mountpoint_overlay_work_path,
+            };
+
             let exec_env = ExecEnv::create(
                 &ctx,
                 &mut stderr(),
@@ -671,6 +681,8 @@ pub fn run_cli() -> Result<()> {
                 sources,
                 &packages.into_iter().cloned().collect(),
                 &tools.into_iter().cloned().collect(),
+                false,
+                Some(mountpoint_overlay),
             )?;
 
             let mut mounts = exec_options

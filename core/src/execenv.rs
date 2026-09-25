@@ -7,7 +7,7 @@ use std::{
 };
 
 use chariot_rootfs::CachedPkgSet;
-use chariot_runtime::{Mount, MountKind, Overlay, RuntimeError, StderrTarget};
+use chariot_runtime::{Mount, MountKind, Overlay, OverlayUpperDirectory, RuntimeError, StderrTarget};
 use chariot_util::{fs::FileSystemError, hash::hash_directory};
 use thiserror::Error;
 use xxhash_rust::xxh3::Xxh3;
@@ -53,6 +53,8 @@ pub struct ExecEnv<'a> {
     pub sources: HashMap<String, Vec<StoreEntry>>,
     pub sysroot: WorkDirectory,
     pub tool_overlay: Option<WorkDirectory>,
+    pub root_readonly: bool,
+    pub root_rw_overlay: Option<OverlayUpperDirectory>,
 }
 
 impl<'a> ExecEnv<'a> {
@@ -63,6 +65,8 @@ impl<'a> ExecEnv<'a> {
         sources: &BTreeMap<String, Arc<Source>>,
         packages: &Vec<Arc<Package>>,
         tools: &Vec<Arc<Package>>,
+        root_readonly: bool,
+        root_rw_overlay: Option<OverlayUpperDirectory>,
     ) -> Result<ExecEnv<'a>, CreateExecEnvError> {
         let mut cached_source_deps = HashMap::new();
         for (name, source) in sources {
@@ -134,6 +138,8 @@ impl<'a> ExecEnv<'a> {
             sources: cached_source_deps,
             sysroot,
             tool_overlay,
+            root_readonly,
+            root_rw_overlay,
         })
     }
 
@@ -242,11 +248,12 @@ impl<'a> ExecEnv<'a> {
             stderr,
             args,
             self.pkgset.as_deref(),
+            !self.root_readonly,
+            self.root_rw_overlay.clone(),
             match &self.tool_overlay {
                 None => Vec::new(),
                 Some(workdir) => vec![workdir.path()],
             },
-            None,
         )
     }
 }

@@ -542,10 +542,10 @@ impl RootFS {
         stderr: StderrTarget<'_>,
         args: Vec<impl AsRef<str>>,
         pkgset: Option<&CachedPkgSet>,
-        root_overlays: Vec<PathBuf>,
+        root_readonly: bool,
         root_rw_overlay: Option<OverlayUpperDirectory>,
+        root_overlays: Vec<PathBuf>,
     ) -> Result<i32, RuntimeError> {
-        let rootfs_readonly = !root_rw_overlay.is_some();
         let mut early_mounts = Vec::new();
 
         let mut lower_directories = root_overlays;
@@ -575,7 +575,7 @@ impl RootFS {
 
         runtime_execute(
             self.sub_path(RootFSPath::Fs),
-            rootfs_readonly,
+            root_readonly,
             CHARIOT_USER_UID,
             CHARIOT_USER_GID,
             cwd,

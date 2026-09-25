@@ -98,8 +98,9 @@ pub fn download_archive(
         StderrTarget::Merge,
         Script::bash("wget --no-hsts -q -O \"$ARCHIVE_PATH\" \"$ARCHIVE_URL\"").command(),
         wget_pkgset,
-        vec![],
+        true,
         None,
+        vec![],
     )?;
 
     if exit_code != 0 {
@@ -115,8 +116,9 @@ pub fn download_archive(
         StderrTarget::Merge,
         Script::bash("echo \"$ARCHIVE_CHECKSUM  $ARCHIVE_PATH\n\" | sha256sum -c -").command(),
         sha256sum_pkgset,
-        vec![],
+        true,
         None,
+        vec![],
     )?;
 
     if exit_code != 0 {
@@ -181,8 +183,9 @@ pub fn extract_archive(
         ))
         .command(),
         bsdtar_pkgset,
-        vec![],
+        true,
         None,
+        vec![],
     )?;
 
     if exit_code != 0 {
