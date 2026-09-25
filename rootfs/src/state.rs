@@ -21,11 +21,6 @@ pub struct CachedManifest {
 
     pub command_pkg_download: String,
     pub command_pkg_install: String,
-
-    pub user_uid: u32,
-    pub user_gid: u32,
-    pub root_uid: u32,
-    pub root_gid: u32,
 }
 
 #[derive(Deserialize, Serialize)]

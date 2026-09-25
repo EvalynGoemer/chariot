@@ -36,9 +36,17 @@ mod state;
 
 pub const DEFAULT_MANIFESTS_URL: &str = "https://cdn.chariot-build.dev/manifests/x86_64/@VERSION@.toml";
 
+const ROOT_UID: u32 = 0;
+const ROOT_GID: u32 = 0;
+
+pub const CHARIOT_USER_UID: u32 = 1000;
+pub const CHARIOT_USER_GID: u32 = 1000;
+pub const CHARIOT_USER_NAME: &str = "chariot";
+pub const CHARIOT_USER_GROUP: &str = "chariot";
+
 /// Describes the version of the on-disk rootfs. If the on-disk representation
 /// changes in a backwards incompatible way, this version should be bumped.
-const ROOTFS_VERSION: i64 = 3;
+const ROOTFS_VERSION: i64 = 4;
 
 #[derive(Debug, Error)]
 pub enum RootFSInitError {
@@ -196,10 +204,6 @@ impl RootFS {
                 binary_to_package_map: manifest.packages.binary_map,
                 command_pkg_download: manifest.commands.pkg_download,
                 command_pkg_install: manifest.commands.pkg_install,
-                user_uid: manifest.ids.user_uid,
-                user_gid: manifest.ids.user_gid,
-                root_uid: manifest.ids.root_uid,
-                root_gid: manifest.ids.root_gid,
             },
         };
 
@@ -249,8 +253,8 @@ impl RootFS {
         let exit_code = runtime_execute(
             rootfs_sub_path(&path, RootFSPath::Fs),
             false,
-            state.cached_manifest.root_uid,
-            state.cached_manifest.root_gid,
+            ROOT_UID,
+            ROOT_GID,
             "/",
             &vec![],
             &vec![],
@@ -363,8 +367,8 @@ impl RootFS {
         let exit_code = runtime_execute(
             self.sub_path(RootFSPath::Fs),
             false,
-            self.state.cached_manifest.root_uid,
-            self.state.cached_manifest.root_gid,
+            ROOT_UID,
+            ROOT_GID,
             "/",
             &vec![],
             &vec![],
@@ -408,8 +412,8 @@ impl RootFS {
         let exit_code = runtime_execute(
             self.sub_path(RootFSPath::Fs),
             false,
-            self.state.cached_manifest.root_uid,
-            self.state.cached_manifest.root_gid,
+            ROOT_UID,
+            ROOT_GID,
             "/",
             &vec![&Mount {
                 dest: PathBuf::new(),
@@ -572,8 +576,8 @@ impl RootFS {
         runtime_execute(
             self.sub_path(RootFSPath::Fs),
             rootfs_readonly,
-            self.state.cached_manifest.user_uid,
-            self.state.cached_manifest.user_gid,
+            CHARIOT_USER_UID,
+            CHARIOT_USER_GID,
             cwd,
             &early_mounts.iter().collect(),
             mounts,
