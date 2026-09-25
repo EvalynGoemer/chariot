@@ -412,7 +412,7 @@ impl RootFS {
 
         let exit_code = runtime_execute(
             self.sub_path(RootFSPath::Fs),
-            true,
+            false,
             self.state.cached_manifest.root_uid,
             self.state.cached_manifest.root_gid,
             "/",

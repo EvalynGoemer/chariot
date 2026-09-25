@@ -241,7 +241,7 @@ fn init(
         rootfs_relative_path
     };
 
-    let prepare_mount = |mount: &Mount| {
+    let ensure_mountpoint = |mount: &Mount| {
         let is_file = match mount.kind {
             MountKind::Bind { is_file, .. } => is_file,
             _ => false,
@@ -285,15 +285,15 @@ fn init(
                         flags | MsFlags::MS_RDONLY | MsFlags::MS_REMOUNT,
                         None::<&str>,
                     )
-                    .expect("configured readonly remount failed");
+                    .expect("configured bind mount failed (readonly remount)");
                 }
             }
             MountKind::FS { fstype } => {
-                mount(None::<&str>, &dest_path, Some(fstype.as_str()), MsFlags::empty(), None::<&str>).expect("configured tmpfs mount failed");
+                mount(None::<&str>, &dest_path, Some(fstype.as_str()), MsFlags::empty(), None::<&str>).expect("configured fs mount failed");
             }
             MountKind::OverlayFS(overlay) => {
                 mount(
-                    Some("overlay"),
+                    None::<&str>,
                     &dest_path,
                     Some("overlay"),
                     MsFlags::empty(),
@@ -304,12 +304,7 @@ fn init(
         }
     };
 
-    // Create mount files & directories
-    for device_mount in &mounts {
-        prepare_mount(&device_mount);
-    }
-
-    // Mount rootfs as read-only
+    // Mount rootfs
     mount(
         Some(rootfs_path.as_ref()),
         rootfs_path.as_ref(),
@@ -318,6 +313,14 @@ fn init(
         None::<&str>,
     )
     .expect("rootfs mount failed");
+
+    // Create mounts
+    for mount in mounts {
+        ensure_mountpoint(&mount);
+        do_mount(mount);
+    }
+
+    // Remount
     let mut remount_flags = MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_NODEV | MsFlags::MS_NOSUID;
     if rootfs_readonly {
         remount_flags |= MsFlags::MS_RDONLY;
@@ -330,11 +333,6 @@ fn init(
         None::<&str>,
     )
     .expect("rootfs remount failed");
-
-    // Create mounts
-    for mount in mounts {
-        do_mount(mount);
-    }
 
     // Enter rootfs
     chdir(rootfs_path.as_ref()).expect("rootfs chdir failed");
