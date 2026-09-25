@@ -42,6 +42,8 @@ pub struct OverlayUpperDirectory {
 #[derive(Debug, Clone)]
 pub struct Overlay {
     pub upper_directory: Option<OverlayUpperDirectory>,
+
+    /// Layers descend by index, index 0 is the topmost etc
     pub lower_directories: Vec<PathBuf>,
 }
 
