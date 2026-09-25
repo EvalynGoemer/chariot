@@ -71,6 +71,7 @@ pub fn fetch_git_repository(ctx: &CoreContext, logger: &mut dyn Write, git_sourc
         )
         .command(),
         ctx.git_pkgset.as_deref(),
+        vec![],
         None,
     )?;
 
@@ -91,6 +92,7 @@ pub fn fetch_git_repository(ctx: &CoreContext, logger: &mut dyn Write, git_sourc
         StderrTarget::Merge,
         Script::bash("git clone --depth=1 \"$GIT_URL\" .").command(),
         ctx.git_pkgset.as_deref(),
+        vec![],
         None,
     )?;
 
@@ -107,6 +109,7 @@ pub fn fetch_git_repository(ctx: &CoreContext, logger: &mut dyn Write, git_sourc
         StderrTarget::Merge,
         Script::bash("git fetch --depth=1 origin \"$GIT_REV\"").command(),
         ctx.git_pkgset.as_deref(),
+        vec![],
         None,
     )?;
 
@@ -123,6 +126,7 @@ pub fn fetch_git_repository(ctx: &CoreContext, logger: &mut dyn Write, git_sourc
         StderrTarget::Merge,
         Script::bash("git checkout FETCH_HEAD").command(),
         ctx.git_pkgset.as_deref(),
+        vec![],
         None,
     )?;
 

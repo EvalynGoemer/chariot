@@ -4,8 +4,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use chariot_rootfs::{CachedPkgSet, RootFSOverlay};
-use chariot_runtime::{Mount, MountKind, RuntimeError, StderrTarget};
+use chariot_rootfs::CachedPkgSet;
+use chariot_runtime::{Mount, MountKind, OverlayUpperDirectory, RuntimeError, StderrTarget};
 use chariot_util::fs::FileSystemError;
 use thiserror::Error;
 
@@ -141,6 +141,7 @@ pub fn package_create(
             format!("xbps-create --built-with chariot --architecture \"$XBPS_TARGET_ARCH\" --pkgver \"$PKG_NAME-${{PKG_VER}}_$PKG_REV\" --desc \"Package $PKG_NAME built by chariot\" --dependencies \"$PKG_RDEPS\" /chariot/xbps/package").as_str(),
         ],
         None,
+        vec![],
         None,
     )?;
 
@@ -182,6 +183,7 @@ pub fn package_create(
             format!("xbps-rindex -f -a \"$PKG_NAME-${{PKG_VER}}_$PKG_REV.$XBPS_TARGET_ARCH.xbps\"").as_str(),
         ],
         None,
+        vec![],
         None,
     )?;
 
@@ -250,15 +252,15 @@ pub fn package_install(
     }
 
     let mut _workdir = None;
-    let rootfs_overlay = match dest_root_overlay {
+    let overlay = match dest_root_overlay {
         true => {
             let overlay_workdir = WorkDirectory::create(&ctx.workdir_parent)?;
-            let overlay = RootFSOverlay::ReadWrite {
-                path: dest_dir.to_path_buf(),
-                work_path: overlay_workdir.path(),
+            let upperdir = OverlayUpperDirectory {
+                upper_directory: dest_dir.to_path_buf(),
+                work_directory: overlay_workdir.path(),
             };
             _workdir = Some(overlay_workdir);
-            Some(overlay)
+            Some(upperdir)
         }
         false => None,
     };
@@ -292,7 +294,8 @@ pub fn package_install(
             .as_str(),
         ],
         pkgset,
-        rootfs_overlay,
+        vec![],
+        overlay,
     )?;
 
     if exit_code != 0 {

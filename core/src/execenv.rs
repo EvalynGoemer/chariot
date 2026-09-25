@@ -6,7 +6,7 @@ use std::{
     sync::Arc,
 };
 
-use chariot_rootfs::{CachedPkgSet, RootFSOverlay};
+use chariot_rootfs::CachedPkgSet;
 use chariot_runtime::{Mount, MountKind, Overlay, RuntimeError, StderrTarget};
 use chariot_util::{fs::FileSystemError, hash::hash_directory};
 use thiserror::Error;
@@ -242,7 +242,11 @@ impl<'a> ExecEnv<'a> {
             stderr,
             args,
             self.pkgset.as_deref(),
-            self.tool_overlay.as_ref().map(|workdir| RootFSOverlay::ReadOnly(workdir.path())),
+            match &self.tool_overlay {
+                None => Vec::new(),
+                Some(workdir) => vec![workdir.path()],
+            },
+            None,
         )
     }
 }

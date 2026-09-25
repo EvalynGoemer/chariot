@@ -116,6 +116,7 @@ pub fn fetch_source(ctx: &CoreContext, logger: &mut dyn Write, source: &Source) 
                         StderrTarget::Merge,
                         Script::bash("echo \"$CHARIOT_PATCH\" | patch -p1").command(),
                         ctx.patch_pkgset.as_deref(),
+                        vec![],
                         None,
                     )?;
 

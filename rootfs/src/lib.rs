@@ -142,11 +142,6 @@ enum RootFSPath {
     PackageSetWork,
 }
 
-pub enum RootFSOverlay {
-    ReadOnly(PathBuf),
-    ReadWrite { path: PathBuf, work_path: PathBuf },
-}
-
 pub struct PkgSetMeta {
     pub id: i64,
     pub state: PkgSetState,
@@ -543,40 +538,32 @@ impl RootFS {
         stderr: StderrTarget<'_>,
         args: Vec<impl AsRef<str>>,
         pkgset: Option<&CachedPkgSet>,
-        rootfs_overlay: Option<RootFSOverlay>,
+        root_overlays: Vec<PathBuf>,
+        root_rw_overlay: Option<OverlayUpperDirectory>,
     ) -> Result<i32, RuntimeError> {
+        let rootfs_readonly = !root_rw_overlay.is_some();
         let mut early_mounts = Vec::new();
 
-        let mut lower_directories = Vec::from([self.sub_path(RootFSPath::Fs)]);
-        if let Some(RootFSOverlay::ReadOnly(path)) = &rootfs_overlay {
-            lower_directories.push(path.clone());
-        }
-
+        let mut lower_directories = root_overlays;
         if let Some(pkgset) = pkgset {
             assert!(pkgset.rootfs.path == self.path);
 
-            lower_directories.insert(1, pkgset.path());
+            lower_directories.push(pkgset.path());
 
             let mut base = &pkgset.base;
             while let Some(pkgset) = base {
-                lower_directories.insert(1, pkgset.path());
+                lower_directories.push(pkgset.path());
                 base = &pkgset.base;
             }
         }
 
-        if pkgset.is_some() || rootfs_overlay.is_some() {
-            lower_directories.reverse();
+        if root_rw_overlay.is_some() || lower_directories.len() > 0 {
+            lower_directories.push(self.sub_path(RootFSPath::Fs));
 
             early_mounts.push(Mount {
                 dest: PathBuf::new(),
                 kind: MountKind::OverlayFS(Overlay {
-                    upper_directory: match rootfs_overlay {
-                        Some(RootFSOverlay::ReadWrite { path, work_path }) => Some(OverlayUpperDirectory {
-                            upper_directory: path,
-                            work_directory: work_path,
-                        }),
-                        _ => None,
-                    },
+                    upper_directory: root_rw_overlay,
                     lower_directories,
                 }),
             });
@@ -584,7 +571,7 @@ impl RootFS {
 
         runtime_execute(
             self.sub_path(RootFSPath::Fs),
-            true,
+            rootfs_readonly,
             self.state.cached_manifest.user_uid,
             self.state.cached_manifest.user_gid,
             cwd,
