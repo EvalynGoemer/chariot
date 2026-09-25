@@ -165,11 +165,11 @@ fn child(
     unshare(CloneFlags::CLONE_NEWUSER).expect("unshare user failed");
 
     write("/proc/self/setgroups", "deny").expect("setgroups write failed");
-    write("/proc/self/uid_map", format!("{} {} 1", uid, euid)).expect("uid_map write failed");
     write("/proc/self/gid_map", format!("{} {} 1", gid, egid)).expect("gid_map write failed");
+    write("/proc/self/uid_map", format!("{} {} 1", uid, euid)).expect("uid_map write failed");
 
-    setuid(uid).expect("setuid failed");
     setgid(gid).expect("setgid failed");
+    setuid(uid).expect("setuid failed");
 
     unshare(CloneFlags::CLONE_NEWPID).expect("unshare pid failed");
 
