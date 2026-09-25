@@ -254,6 +254,8 @@ fn init(
                 remove_dir(&path).expect("prepare_mount failed: remove_dir failed");
             } else if !is_file && !meta.is_dir() {
                 remove_file(&path).expect("prepare_mount failed: remove_file failed");
+            } else {
+                return;
             }
         }
 
