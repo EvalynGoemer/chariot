@@ -104,6 +104,10 @@ pub fn package_create(
         "/chariot/xbps/dest",
         &vec![
             &Mount {
+                dest: PathBuf::from("/chariot"),
+                kind: MountKind::FS { fstype: String::from("tmpfs") }
+            },
+            &Mount {
                 dest: PathBuf::from("/chariot/xbps/dest"),
                 kind: MountKind::Bind {
                     from: dest_dir.to_path_buf(),
@@ -146,14 +150,22 @@ pub fn package_create(
 
     let exit_code = ctx.rootfs.exec(
         "/chariot/xbps/repo",
-        &vec![&Mount {
-            dest: PathBuf::from("/chariot/xbps/repo"),
-            kind: MountKind::Bind {
-                from: dest_dir.to_path_buf(),
-                read_only: false,
-                is_file: false,
+        &vec![
+            &Mount {
+                dest: PathBuf::from("/chariot"),
+                kind: MountKind::FS {
+                    fstype: String::from("tmpfs"),
+                },
             },
-        }],
+            &Mount {
+                dest: PathBuf::from("/chariot/xbps/repo"),
+                kind: MountKind::Bind {
+                    from: dest_dir.to_path_buf(),
+                    read_only: false,
+                    is_file: false,
+                },
+            },
+        ],
         &HashMap::from([
             ("XBPS_ARCH", "invalid"),
             ("XBPS_TARGET_ARCH", arch),
@@ -197,6 +209,13 @@ pub fn package_install(
     validate_package_version(version)?;
     validate_arch(arch)?;
 
+    let mountpoint_mount = Mount {
+        dest: PathBuf::from("/chariot"),
+        kind: MountKind::FS {
+            fstype: String::from("tmpfs"),
+        },
+    };
+
     let repo_mounts = repo_dirs
         .into_iter()
         .enumerate()
@@ -222,6 +241,14 @@ pub fn package_install(
         }),
     };
 
+    let mut mounts = vec![&mountpoint_mount];
+    for repo_mount in &repo_mounts {
+        mounts.push(repo_mount);
+    }
+    if let Some(dest_mount) = &dest_mount {
+        mounts.push(dest_mount);
+    }
+
     let mut _workdir = None;
     let rootfs_overlay = match dest_root_overlay {
         true => {
@@ -238,7 +265,7 @@ pub fn package_install(
 
     let exit_code = ctx.rootfs.exec(
         "/",
-        &repo_mounts.iter().chain(&dest_mount).collect(),
+        &mounts,
         &HashMap::from([
             ("XBPS_ARCH", "invalid"),
             ("XBPS_TARGET_ARCH", arch),

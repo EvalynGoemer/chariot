@@ -35,8 +35,14 @@ pub enum GitFetchError {
 }
 
 pub fn fetch_git_repository(ctx: &CoreContext, logger: &mut dyn Write, git_source: &GitSource) -> Result<WorkDirectory, GitFetchError> {
-    let work_directory = WorkDirectory::create(&ctx.workdir_parent)?;
+    let mountpoint_bind = Mount {
+        dest: PathBuf::from("/chariot"),
+        kind: MountKind::FS {
+            fstype: String::from("tmpfs"),
+        },
+    };
 
+    let work_directory = WorkDirectory::create(&ctx.workdir_parent)?;
     let source_bind = Mount {
         dest: PathBuf::from("/chariot/source"),
         kind: MountKind::Bind {
@@ -46,9 +52,11 @@ pub fn fetch_git_repository(ctx: &CoreContext, logger: &mut dyn Write, git_sourc
         },
     };
 
+    let mounts = vec![&mountpoint_bind, &source_bind];
+
     let exit_code = ctx.rootfs.exec(
         "/chariot/source",
-        &vec![&source_bind],
+        &mounts,
         &HashMap::from([("GIT_URL", git_source.url.as_str()), ("GIT_REV", git_source.revision.as_str())]),
         false,
         Some(logger),
@@ -76,7 +84,7 @@ pub fn fetch_git_repository(ctx: &CoreContext, logger: &mut dyn Write, git_sourc
 
     let exit_code = ctx.rootfs.exec(
         "/chariot/source",
-        &vec![&source_bind],
+        &mounts,
         &HashMap::from([("GIT_URL", git_source.url.as_str())]),
         false,
         Some(logger),
@@ -92,7 +100,7 @@ pub fn fetch_git_repository(ctx: &CoreContext, logger: &mut dyn Write, git_sourc
 
     let exit_code = ctx.rootfs.exec(
         "/chariot/source",
-        &vec![&source_bind],
+        &mounts,
         &HashMap::from([("GIT_REV", git_source.revision.as_str())]),
         false,
         Some(logger),
@@ -108,7 +116,7 @@ pub fn fetch_git_repository(ctx: &CoreContext, logger: &mut dyn Write, git_sourc
 
     let exit_code = ctx.rootfs.exec(
         "/chariot/source",
-        &vec![&source_bind],
+        &mounts,
         &HashMap::<&str, &str>::new(),
         false,
         Some(logger),

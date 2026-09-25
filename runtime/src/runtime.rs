@@ -31,7 +31,6 @@ enum StderrDest {
 
 pub(super) fn runtime_execute_bare(
     rootfs_path: impl AsRef<Path>,
-    rootfs_readonly: bool,
     uid: Uid,
     gid: Gid,
     cwd: impl AsRef<Path>,
@@ -124,7 +123,6 @@ pub(super) fn runtime_execute_bare(
 
             child(
                 rootfs_path,
-                rootfs_readonly,
                 network_isolation,
                 uid,
                 gid,
@@ -142,7 +140,6 @@ pub(super) fn runtime_execute_bare(
 
 fn child(
     rootfs_path: impl AsRef<Path>,
-    rootfs_readonly: bool,
     network_isolation: bool,
     uid: Uid,
     gid: Gid,
@@ -189,7 +186,6 @@ fn child(
         }
         ForkResult::Child => init(
             rootfs_path,
-            rootfs_readonly,
             network_isolation,
             cwd,
             mounts,
@@ -204,7 +200,6 @@ fn child(
 
 fn init(
     rootfs_path: impl AsRef<Path>,
-    rootfs_readonly: bool,
     network_isolation: bool,
     cwd: &Path,
     mounts: Vec<&Mount>,
@@ -233,7 +228,7 @@ fn init(
         for component in path.components() {
             match component {
                 Component::Prefix(_) | Component::RootDir | Component::CurDir => {}
-                Component::ParentDir => rootfs_relative_path.push(".."),
+                Component::ParentDir => rootfs_relative_path.push(Component::ParentDir),
                 Component::Normal(component) => rootfs_relative_path.push(component),
             }
         }
@@ -272,23 +267,26 @@ fn init(
     let do_mount = |mount_config: &Mount| {
         let dest_path = relative_rootfs_path(&mount_config.dest);
         match &mount_config.kind {
-            MountKind::Bind { from, read_only, is_file } => {
-                let mut flags = MsFlags::MS_BIND;
-                if !is_file {
-                    flags |= MsFlags::MS_REC;
-                }
-
-                mount(Some(from), &dest_path, None::<&str>, flags, None::<&str>).expect("configured bind mount failed");
+            MountKind::Bind { from, read_only, .. } => {
+                mount(Some(from), &dest_path, None::<&str>, MsFlags::MS_BIND | MsFlags::MS_REC, None::<&str>).expect("configured bind mount failed");
                 if *read_only {
                     mount(
-                        Some(from),
+                        None::<&str>,
                         &dest_path,
                         None::<&str>,
-                        flags | MsFlags::MS_RDONLY | MsFlags::MS_REMOUNT,
+                        MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY,
                         None::<&str>,
                     )
                     .expect("configured bind mount failed (readonly remount)");
                 }
+            }
+            MountKind::Remount { readonly } => {
+                let mut flags = MsFlags::MS_BIND | MsFlags::MS_REMOUNT;
+                if *readonly {
+                    flags |= MsFlags::MS_RDONLY;
+                }
+
+                mount(None::<&str>, &relative_rootfs_path(&mount_config.dest), None::<&str>, flags, None::<&str>).expect("configured remount failed");
             }
             MountKind::FS { fstype } => {
                 mount(None::<&str>, &dest_path, Some(fstype.as_str()), MsFlags::empty(), None::<&str>).expect("configured fs mount failed");
@@ -306,35 +304,11 @@ fn init(
         }
     };
 
-    // Mount rootfs
-    mount(
-        Some(rootfs_path.as_ref()),
-        rootfs_path.as_ref(),
-        None::<&str>,
-        MsFlags::MS_BIND,
-        None::<&str>,
-    )
-    .expect("rootfs mount failed");
-
     // Create mounts
-    for mount in mounts {
-        ensure_mountpoint(&mount);
+    for mount in &mounts {
+        ensure_mountpoint(mount);
         do_mount(mount);
     }
-
-    // Remount
-    let mut remount_flags = MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_NODEV | MsFlags::MS_NOSUID;
-    if rootfs_readonly {
-        remount_flags |= MsFlags::MS_RDONLY;
-    }
-    mount(
-        Some(rootfs_path.as_ref()),
-        rootfs_path.as_ref(),
-        None::<&str>,
-        remount_flags,
-        None::<&str>,
-    )
-    .expect("rootfs remount failed");
 
     // Enter rootfs
     chdir(rootfs_path.as_ref()).expect("rootfs chdir failed");

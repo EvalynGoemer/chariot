@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    fs::File,
     io::Write,
     path::{Path, PathBuf},
     sync::Arc,
@@ -39,13 +38,10 @@ pub enum ArchiveFetchError {
 }
 
 pub fn fetch_archive(ctx: &CoreContext, logger: &mut dyn Write, archive: &Archive) -> Result<WorkDirectory, ArchiveFetchError> {
-    let download_dir = WorkDirectory::create(&ctx.workdir_parent)?;
-    let archive_path = download_dir.path().join("archive");
+    const ARCHIVE_NAME: &str = "archive";
 
-    File::create(&archive_path).map_err(|err| FileSystemError::CreateFile {
-        path: archive_path.clone(),
-        source: err,
-    })?;
+    let download_dir = WorkDirectory::create(&ctx.workdir_parent)?;
+    let archive_path = download_dir.path().join(ARCHIVE_NAME);
 
     download_archive(
         &ctx.rootfs,
@@ -54,7 +50,8 @@ pub fn fetch_archive(ctx: &CoreContext, logger: &mut dyn Write, archive: &Archiv
         logger,
         &archive.url,
         &archive.checksum,
-        &archive_path,
+        &download_dir.path(),
+        ARCHIVE_NAME,
     )?;
 
     let work_directory = WorkDirectory::create(&ctx.workdir_parent)?;
@@ -78,25 +75,28 @@ pub fn download_archive(
     logger: &mut dyn Write,
     url: &str,
     checksum: &str,
-    dest: &Path,
+    dest_dir: &Path,
+    dest_filename: &str,
 ) -> Result<(), ArchiveFetchError> {
-    let archive_binding = Mount {
-        dest: PathBuf::from("/chariot/archive"),
+    let download_dir_bind = Mount {
+        dest: PathBuf::from("/chariot"),
         kind: MountKind::Bind {
-            from: dest.to_path_buf(),
+            from: dest_dir.to_path_buf(),
             read_only: false,
-            is_file: true,
+            is_file: false,
         },
     };
 
+    let archive_path = PathBuf::from("/chariot").join(dest_filename);
+
     let exit_code = rootfs.exec(
         "/",
-        &vec![&archive_binding],
-        &HashMap::from([("ARCHIVE_URL", url)]),
+        &vec![&download_dir_bind],
+        &HashMap::from([("ARCHIVE_PATH", archive_path.to_string_lossy().as_ref()), ("ARCHIVE_URL", url)]),
         false,
         Some(logger),
         StderrTarget::Merge,
-        Script::bash("wget --no-hsts -qO /chariot/archive \"$ARCHIVE_URL\"").command(),
+        Script::bash("wget --no-hsts -q -O \"$ARCHIVE_PATH\" \"$ARCHIVE_URL\"").command(),
         wget_pkgset,
         None,
     )?;
@@ -107,12 +107,12 @@ pub fn download_archive(
 
     let exit_code = rootfs.exec(
         "/",
-        &vec![&archive_binding],
-        &HashMap::from([("ARCHIVE_CHECKSUM", checksum)]),
+        &vec![&download_dir_bind],
+        &HashMap::from([("ARCHIVE_PATH", archive_path.to_string_lossy().as_ref()), ("ARCHIVE_CHECKSUM", checksum)]),
         false,
         Some(logger),
         StderrTarget::Merge,
-        Script::bash("echo \"$ARCHIVE_CHECKSUM  /chariot/archive\n\" | sha256sum -c -").command(),
+        Script::bash("echo \"$ARCHIVE_CHECKSUM  $ARCHIVE_PATH\n\" | sha256sum -c -").command(),
         sha256sum_pkgset,
         None,
     )?;
@@ -146,6 +146,12 @@ pub fn extract_archive(
     let exit_code = rootfs.exec(
         "/",
         &vec![
+            &Mount {
+                dest: PathBuf::from("/chariot"),
+                kind: MountKind::FS {
+                    fstype: String::from("tmpfs"),
+                },
+            },
             &Mount {
                 dest: PathBuf::from("/chariot/source"),
                 kind: MountKind::Bind {

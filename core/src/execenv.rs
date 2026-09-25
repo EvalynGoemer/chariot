@@ -200,9 +200,30 @@ impl<'a> ExecEnv<'a> {
             },
         };
 
+        let mountpoint_mount = Mount {
+            dest: PathBuf::from("/chariot"),
+            kind: MountKind::FS {
+                fstype: String::from("tmpfs"),
+            },
+        };
+
+        let mountpoint_readonly_remount = Mount {
+            dest: PathBuf::from("/chariot"),
+            kind: MountKind::Remount { readonly: true },
+        };
+
+        let mut final_mounts = vec![&mountpoint_mount];
+        for source_mount in &source_mounts {
+            final_mounts.push(source_mount);
+        }
+        final_mounts.push(&sysroot_mount);
+        for mount in mounts {
+            final_mounts.push(mount);
+        }
+        final_mounts.push(&mountpoint_readonly_remount);
+
         let parallelism_string = self.ctx.parallelism.to_string();
 
-        let base_mounts = source_mounts.into_iter().chain([sysroot_mount]).collect::<Vec<_>>();
         let base_env = HashMap::from([
             ("SOURCES_DIR", EXECENV_SOURCES_DIRECTORY_PATH),
             ("SYSROOT_DIR", EXECENV_SYSROOT_DIRECTORY_PATH),
@@ -211,7 +232,7 @@ impl<'a> ExecEnv<'a> {
 
         self.ctx.rootfs.exec(
             cwd,
-            &base_mounts.iter().chain(mounts).collect(),
+            &final_mounts,
             &base_env
                 .into_iter()
                 .chain(environment.iter().map(|(k, v)| (k.as_ref(), v.as_ref())))

@@ -48,6 +48,7 @@ pub struct Overlay {
 #[derive(Debug, Clone)]
 pub enum MountKind {
     Bind { from: PathBuf, read_only: bool, is_file: bool },
+    Remount { readonly: bool },
     FS { fstype: String },
     OverlayFS(Overlay),
 }
@@ -189,26 +190,42 @@ pub fn runtime_execute(
         });
     }
 
-    let mut new_mounts: Vec<&Mount> = Vec::new();
+    let rootfs_mounts = Mount {
+        dest: PathBuf::new(),
+        kind: MountKind::Bind {
+            from: rootfs_path.as_ref().to_path_buf(),
+            read_only: true,
+            is_file: false,
+        },
+    };
+
+    let rootfs_remount = Mount {
+        dest: PathBuf::new(),
+        kind: MountKind::Remount { readonly: root_readonly },
+    };
+
+    let mut final_mounts = vec![&rootfs_mounts];
+
     for mount in early_mounts {
-        new_mounts.push(mount);
+        final_mounts.push(mount);
     }
 
     for mount in &additional_mounts {
-        new_mounts.push(mount);
+        final_mounts.push(mount);
     }
 
     for mount in late_mounts {
-        new_mounts.push(mount);
+        final_mounts.push(mount);
     }
+
+    final_mounts.push(&rootfs_remount);
 
     runtime_execute_bare(
         rootfs_path.as_ref(),
-        root_readonly,
         Uid::from_raw(uid),
         Gid::from_raw(gid),
         cwd.as_ref(),
-        new_mounts,
+        final_mounts,
         default_env,
         network_isolation,
         stdin,

@@ -1,7 +1,11 @@
 use std::{collections::HashMap, hash::Hash, io::Write, path::PathBuf};
 
 use chariot_rootfs::{CachedPkgSet, GetPkgSetError};
-use chariot_runtime::{Mount, MountKind::OverlayFS, Overlay, OverlayUpperDirectory, RuntimeError, StderrTarget};
+use chariot_runtime::{
+    Mount,
+    MountKind::{self, OverlayFS},
+    Overlay, OverlayUpperDirectory, RuntimeError, StderrTarget,
+};
 use chariot_util::fs::{FileSystemError, copy_recursive};
 use thiserror::Error;
 use xxhash_rust::xxh3::Xxh3;
@@ -88,16 +92,24 @@ pub fn fetch_source(ctx: &CoreContext, logger: &mut dyn Write, source: &Source) 
                 for patch in &source.patches {
                     let exit_code = ctx.rootfs.exec(
                         "/chariot/source",
-                        &vec![&Mount {
-                            dest: PathBuf::from("/chariot/source"),
-                            kind: OverlayFS(Overlay {
-                                lower_directories: store_entries.iter().map(|entry| entry.path()).collect(),
-                                upper_directory: Some(OverlayUpperDirectory {
-                                    upper_directory: work_directory.path(),
-                                    work_directory: overlay_work_directory.path(),
+                        &vec![
+                            &Mount {
+                                dest: PathBuf::from("/chariot"),
+                                kind: MountKind::FS {
+                                    fstype: String::from("tmpfs"),
+                                },
+                            },
+                            &Mount {
+                                dest: PathBuf::from("/chariot/source"),
+                                kind: OverlayFS(Overlay {
+                                    lower_directories: store_entries.iter().map(|entry| entry.path()).collect(),
+                                    upper_directory: Some(OverlayUpperDirectory {
+                                        upper_directory: work_directory.path(),
+                                        work_directory: overlay_work_directory.path(),
+                                    }),
                                 }),
-                            }),
-                        }],
+                            },
+                        ],
                         &HashMap::from([("CHARIOT_PATCH", patch)]),
                         false,
                         Some(logger),
