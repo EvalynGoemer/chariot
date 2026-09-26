@@ -466,7 +466,7 @@ fn build_prepare(build_opts: CommonBuildOptions, local_config: &CliConfig) -> Re
 
             if !version_match && !hash_match {
                 bail!(
-                    "Rootfs version mismatch (current `{}`, wanted `{}). Delete current rootfs at convenience",
+                    "Rootfs manifest version mismatch (current `{}`, wanted `{}). Delete current rootfs at convenience",
                     hash,
                     base_config.rootfs.hash
                 );
